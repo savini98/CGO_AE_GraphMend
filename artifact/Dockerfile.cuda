@@ -1,0 +1,131 @@
+# GraphMend CGO 2027 artifact: CUDA image, for the latency and throughput
+# claims (paper claims C8, C9, C10: cold-start speedup up to 26x, steady-state
+# forward speedup 1.05x to 1.39x, throughput up to 15%).
+#
+# ============================================================================
+# BUILT, NOT GPU-EXERCISED. This image builds clean and its environment is
+# verified at build time (CUDA wheel, transformers, and a warm Jac compiler
+# cache -- see the RUN checks below). What has NOT been done is running it
+# against a physical GPU: the machine holding the RTX 3090 used for this work
+# has Docker but no nvidia-container-toolkit, so `--gpus all` is refused by
+# the daemon there and no container has ever seen the device.
+#
+# Concretely, verified:
+#   - the image builds, on linux/amd64
+#   - torch 2.12.1+cu126 installs and imports, and reports a CUDA build
+#   - the Jac toolchain runs and its compiler cache warms
+# Concretely, NOT verified:
+#   - `torch.cuda.is_available()` inside this image
+#   - anything the benchmark measures
+#
+# The benchmark entrypoint is a stub and says so when run; the GPU numbers are
+# a separate track from this image. See artifact/README.md.
+# ============================================================================
+#
+# Intended use, from the REPOSITORY ROOT:
+#
+#   docker build -f artifact/Dockerfile.cuda -t graphmend-cuda .
+#   docker run --rm --gpus all graphmend-cuda            # prints the stub notice
+#   docker run --rm --gpus all --entrypoint bash graphmend-cuda
+#
+# `--gpus all` needs the NVIDIA Container Toolkit on the host. Without it the
+# daemon fails with `could not select device driver "" with capabilities:
+# [[gpu]]`, which is a host configuration problem and not a problem with this
+# image.
+#
+# The break-elimination and correctness claims do NOT need this image. Use
+# artifact/Dockerfile.cpu for those; they are the claims this artifact actually
+# reproduces.
+
+# Same interpreter as the CPU image, and for a reason that is not cosmetic.
+# The obvious base here is nvidia/cuda:*-runtime-ubuntu24.04, but Ubuntu 24.04
+# ships Python 3.12 as python3, and the Jac toolchain's from-source path is
+# exercised on 3.13. Picking the base image's interpreter would put the
+# toolchain on an untested one to gain a system CUDA install that is redundant
+# anyway: torch's cu126 wheels vendor their own CUDA runtime through the
+# nvidia-* dependencies, and the kernel driver comes from the host via
+# `--gpus all`. So the slim image plus the CUDA wheel is both smaller and the
+# better-tested combination.
+FROM python:3.13-slim
+
+# Pinned for the same reason as the CPU image, and to the same version: the
+# paper's torch 2.12, which is what every recorded row was measured on.
+ARG TORCH_VERSION=2.12.1
+ARG TORCHVISION_VERSION=0.27.1
+# cu126 is the paper's CUDA 12.6.
+ARG TORCH_INDEX=https://download.pytorch.org/whl/cu126
+ARG NUMPY_VERSION=2.4.6
+ARG TRANSFORMERS_VERSION=4.52.4
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    TOKENIZERS_PARALLELISM=false \
+    TRANSFORMERS_NO_ADVISORY_WARNINGS=1 \
+    XDG_CACHE_HOME=/opt/jac/cache
+
+# Unlike the CPU image, this one needs a C++ compiler at RUN time, not just at
+# build time. TorchInductor generates C++ host-side wrapper code for every
+# compiled region and invokes the system compiler on it; without g++ the
+# backend the latency claims are about cannot run at all. The CPU image omits
+# this because it only ever counts graphs, which does not codegen.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        bash ca-certificates build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --index-url "${TORCH_INDEX}" \
+        "torch==${TORCH_VERSION}" \
+        "torchvision==${TORCHVISION_VERSION}" \
+        "numpy==${NUMPY_VERSION}"
+
+RUN pip install "transformers==${TRANSFORMERS_VERSION}"
+
+# The same opt-in model dependencies as the CPU image. stella-en-400M-v5 is
+# the one row that needs a GPU to run at all, so unlike the CPU image this one
+# does install xformers for it.
+RUN pip install \
+        "timm==1.0.28" \
+        "einops==0.8.2" \
+        "accelerate==1.14.0" \
+        "pillow==12.1.1" \
+        "chronos-forecasting==2.3.1" \
+        "transformers-stream-generator==0.0.5"
+
+# Unlike the CPU image, this check must NOT assert cuda is None: here a CUDA
+# build is the point. It does not assert a GPU is visible either, because
+# `docker build` has no --gpus and the device only appears at run time. That
+# gap is exactly the "NOT verified" item in the header.
+RUN python -c "import torch, transformers; \
+print('torch', torch.__version__, 'cuda:', torch.version.cuda); \
+print('transformers', transformers.__version__); \
+assert torch.version.cuda is not None, 'expected a CUDA wheel, got the CPU build'"
+
+COPY jac.toml /opt/jaseci/jac.toml
+COPY jac /opt/jaseci/jac
+COPY artifact /opt/jaseci/artifact
+
+ENV PYTHONPATH=/opt/jaseci/jac
+
+# Both steps are explained at length in artifact/Dockerfile.cpu, which carries
+# the identical pair. In short: the typeshed stdlib stubs are gitignored and
+# must be materialized or no Jac compile works, and the warm-up is a real
+# `jac run` because it caches 162 modules where `--help` caches 31, and because
+# it doubles as the build-time proof that the toolchain works in this image.
+RUN python /opt/jaseci/artifact/fetch_typeshed.py /opt/jaseci/jac
+
+RUN cd /opt/jaseci/jac \
+    && printf 'with entry { print("jac toolchain ok"); }\n' > /tmp/warm.jac \
+    && python -m jaclang run /tmp/warm.jac \
+    && rm -f /tmp/warm.jac \
+    && test -d "$XDG_CACHE_HOME/jac/jir/bootstrap" \
+    && test -d "$XDG_CACHE_HOME/jac/jir/modules" \
+    && chmod -R a+rX /opt/jac/cache
+
+WORKDIR /opt/jaseci
+
+# The benchmark is a stub and says so when run. It is the entrypoint anyway,
+# so that running this image reports its own status rather than looking
+# plausible and producing a number nobody should quote.
+ENTRYPOINT ["python", "/opt/jaseci/artifact/gpu/bench.py"]

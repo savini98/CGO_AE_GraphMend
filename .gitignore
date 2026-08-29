@@ -1,0 +1,14 @@
+# Materialized by artifact/fetch_typeshed.py at image build time, and by
+# `zig build fetch-typeshed` in a source checkout. Not tracked: only PIN,
+# TARBALL_SHA256, LICENSE and PROVENANCE.md are.
+jac/jaclang/vendor/typeshed/stdlib
+
+# Python / build noise
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+.DS_Store
+
+# Reviewer scratch
+hf-cache/
+*.log

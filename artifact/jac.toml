@@ -1,0 +1,41 @@
+# Project configuration for reviewers who write their OWN measurement program.
+#
+# `jac run` resolves configuration to the NEAREST ANCESTOR jac.toml: it walks up
+# from the working directory, the nearest file wins, and there is no merging
+# with files further up. So this file governs any program run with this
+# directory (or a subdirectory of it) as the working directory, and nothing
+# else. Copy it next to your own script if you work elsewhere.
+#
+# The paper_eval harness does NOT read this file. run_eval.py writes a fresh
+# jac.toml per arm into a private temporary directory, because the two arms
+# differ only in these two keys and there is no CLI switch for them. This file
+# exists so that a command a reviewer types by hand behaves the same way as the
+# harness does.
+
+[run]
+
+# GraphMend itself. Default is already `true` in the toolchain; it is written
+# out here so this file documents both halves of the switch rather than the
+# surprising half only. Setting it to false disables all three rules
+# everywhere, which is what the harness does for its "off" arm.
+graphmend = true
+
+# THE OPT-IN THAT MATTERS. Default is `false` in the toolchain.
+#
+# Claiming and recompiling IMPORTED third-party code is a separate consent
+# decision from enabling GraphMend, and it is off unless a project asks for it.
+# Every Hugging Face model in this evaluation lives in imported third-party
+# code (`transformers.models.*`, or `transformers_modules.*` for Hub remote
+# code), so with the stock default GraphMend transforms nothing in the model
+# and a graphmend-on run measures exactly what a graphmend-off run measures.
+#
+# Symptom of forgetting it: every row reads "N -> N, 0% fixed" and no error,
+# warning, or diagnostic is printed anywhere.
+graphmend_claim_imports = true
+
+# Optional ablation knob, unset here. Comma-separated rules to skip:
+#   trap  = validation-guard lowering
+#   where = predicated control flow
+#   defer = side-effect (logger / warnings.warn) deferral
+# Also available as `jac run --graphmend_disable defer program.py`.
+# graphmend_disable = ""
