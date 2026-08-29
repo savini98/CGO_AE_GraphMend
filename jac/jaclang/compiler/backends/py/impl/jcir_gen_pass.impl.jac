@@ -4919,6 +4919,15 @@ impl JcirGenPass.exit_jsx_comment(nd: JsxComment) -> None {
     self.set_out(nd, []);
 }
 
+impl JcirGenPass.exit_scope_decl_stmt(nd: ScopeDeclStmt) -> None {
+    if not nd.names {
+        self.set_out(nd, []);
+        return;
+    }
+    cls_name = 'Nonlocal' if nd.is_nonlocal else 'Global';
+    self.set_out(nd, [self.nod(cls_name, ['names'], [list(nd.names)])]);
+}
+
 impl JcirGenPass.exit_semi(nd: Semi) -> None {
     ;
 }

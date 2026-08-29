@@ -47,19 +47,32 @@ authors' own metric (first iteration minus compilation, excluded from both
 arms): t5-small 3.29x, MoLFormer-XL 2.22x, Phi-4-mini 5.92x, with CUDA-graph
 launches per forward going 4 to 1, 50 to 1, and 5 to 1 respectively.
 
+**Throughput (C10) is measured, and what it shows is a mechanism rather than a
+single number.** The gain tracks how many CUDA-graph launches the transform
+eliminates, and shrinks as the batch grows:
+
+| model | launches | batch 1 | batch 8 | large batch |
+|---|---|---|---|---|
+| t5-small | 4 -> 1 | 0.984x | 1.000x | 1.001x (b256) |
+| Phi-4-mini | 5 -> 1 | 1.008x | 1.005x | 1.002x (b16) |
+| **MoLFormer-XL** | **50 -> 1** | **1.70x** | 1.017x | 1.009x (b512) |
+
+MoLFormer sheds 49 of its 50 launches and gains 70% at batch 1, and nothing by
+batch 512 where compute dominates. Models shedding three or four launches gain
+nothing at any batch size. The batch-1 figure is four runs (1.729x, 1.616x,
+1.692x, 1.755x) against a noise band of about half a percent.
+
 ## What it does not
 
 Stated here rather than left for a reviewer to discover:
 
 - **One row disagrees.** grounding-dino measures 56% against Table 2's 58%.
-- **Throughput (C10) is not measured.**
 - **The claim values in the tables are marked UNVERIFIED.** Figures quoted in
   earlier drafts of this artifact do not match the paper text available to
   check. They need reconciling against the submission.
-- **`from_pretrained` does not work** under `graphmend_claim_imports`, because
-  Python ingestion drops `global` and `nonlocal` statements. The measured rows
-  are unaffected: they build via `from_config`, and no measured modeling file
-  uses a function-scope `global`.
+- **Against the paper's stated ranges**, large-batch throughput sits below
+  "5-8% higher" at roughly 0 to 2%, and small-batch MoLFormer sits far above it.
+  Both are inside the authors' own spread.
 - **The CUDA image has never run against a physical GPU.** It builds and its
   environment is verified at build time; the machine holding the GPU used for
   this work has Docker without the NVIDIA Container Toolkit.

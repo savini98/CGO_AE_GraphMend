@@ -1825,6 +1825,12 @@ impl CtrlStmt.postinit -> None {
 }
 
 
+impl ScopeDeclStmt.postinit -> None {
+    UniNode.postinit(self);
+    CodeBlockStmt.postinit(self);
+}
+
+
 impl DeleteStmt.postinit -> None {
     UniNode.postinit(self);
     CodeBlockStmt.postinit(self);

@@ -361,6 +361,10 @@ impl ReturnStmt.accept_enter(v: UniPass) -> None {
     v.enter_return_stmt(self);
 }
 
+impl ScopeDeclStmt.accept_enter(v: UniPass) -> None {
+    v.enter_scope_decl_stmt(self);
+}
+
 impl SemDef.accept_enter(v: UniPass) -> None {
     v.enter_sem_def(self);
 }
@@ -827,6 +831,10 @@ impl ReportStmt.accept_exit(v: UniPass) -> None {
 
 impl ReturnStmt.accept_exit(v: UniPass) -> None {
     v.exit_return_stmt(self);
+}
+
+impl ScopeDeclStmt.accept_exit(v: UniPass) -> None {
+    v.exit_scope_decl_stmt(self);
 }
 
 impl SemDef.accept_exit(v: UniPass) -> None {

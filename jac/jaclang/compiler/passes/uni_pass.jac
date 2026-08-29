@@ -95,6 +95,7 @@ import from jaclang.compiler.frontend.unitree {
     RaiseStmt,
     ReportStmt,
     ReturnStmt,
+    ScopeDeclStmt,
     SemDef,
     Semi,
     SetCompr,
@@ -227,6 +228,7 @@ obj UniPass(ModuleCodegenPass) {
     def enter_raise_stmt(nd: RaiseStmt) -> None;
     def enter_report_stmt(nd: ReportStmt) -> None;
     def enter_return_stmt(nd: ReturnStmt) -> None;
+    def enter_scope_decl_stmt(nd: ScopeDeclStmt) -> None;
     def enter_sem_def(nd: SemDef) -> None;
     def enter_set_compr(nd: SetCompr) -> None;
     def enter_set_val(nd: SetVal) -> None;
@@ -344,6 +346,7 @@ obj UniPass(ModuleCodegenPass) {
     def exit_raise_stmt(nd: RaiseStmt) -> None;
     def exit_report_stmt(nd: ReportStmt) -> None;
     def exit_return_stmt(nd: ReturnStmt) -> None;
+    def exit_scope_decl_stmt(nd: ScopeDeclStmt) -> None;
     def exit_sem_def(nd: SemDef) -> None;
     def exit_semi(nd: Semi) -> None;
     def exit_set_compr(nd: SetCompr) -> None;

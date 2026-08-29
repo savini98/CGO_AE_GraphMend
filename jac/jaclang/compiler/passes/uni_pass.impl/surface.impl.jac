@@ -361,6 +361,10 @@ impl UniPass.enter_return_stmt(nd: ReturnStmt) -> None {
     self.default_enter(nd);
 }
 
+impl UniPass.enter_scope_decl_stmt(nd: ScopeDeclStmt) -> None {
+    self.default_enter(nd);
+}
+
 impl UniPass.enter_sem_def(nd: SemDef) -> None {
     self.default_enter(nd);
 }
@@ -826,6 +830,10 @@ impl UniPass.exit_report_stmt(nd: ReportStmt) -> None {
 }
 
 impl UniPass.exit_return_stmt(nd: ReturnStmt) -> None {
+    self.default_exit(nd);
+}
+
+impl UniPass.exit_scope_decl_stmt(nd: ScopeDeclStmt) -> None {
     self.default_exit(nd);
 }
 

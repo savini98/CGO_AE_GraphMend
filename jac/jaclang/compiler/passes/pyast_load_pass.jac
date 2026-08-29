@@ -79,6 +79,7 @@ import from jaclang.compiler.frontend.unitree {
     PythonModuleAst,
     RaiseStmt,
     ReturnStmt,
+    ScopeDeclStmt,
     Semi,
     SetCompr,
     SetVal,
@@ -186,7 +187,7 @@ obj PyastBuildPass(Transform) {
     def proc_template_str(nd: py_ast.AST) -> UniNode;
     def proc_interpolation(nd: py_ast.AST) -> UniNode;
     def proc_generator_exp(nd: py_ast.GeneratorExp) -> GenCompr;
-    def proc_global(nd: py_ast.Global) -> Semi;
+    def proc_global(nd: py_ast.Global) -> ScopeDeclStmt;
     def proc_if_exp(nd: py_ast.IfExp) -> IfElseExpr;
     def proc_import(nd: py_ast.Import) -> Import;
     def proc_import_from(nd: py_ast.ImportFrom) -> Import;
@@ -205,9 +206,10 @@ obj PyastBuildPass(Transform) {
     def proc_match_value(nd: py_ast.MatchValue) -> MatchValue;
     def proc_name(nd: py_ast.Name) -> Name;
     def proc_named_expr(nd: py_ast.NamedExpr) -> AtomUnit;
-    def proc_nonlocal(nd: py_ast.Nonlocal) -> Semi;
+    def proc_nonlocal(nd: py_ast.Nonlocal) -> ScopeDeclStmt;
     def proc_pass(nd: py_ast.Pass) -> Semi;
     def proc_set(nd: py_ast.Set) -> SetVal;
+    def _scope_decl_stmt(names: list[str], is_nonlocal: bool) -> ScopeDeclStmt;
     def _proc_compr(nd: PyComprehensionNode, compr_cls: type[T]) -> T;
     def proc_set_comp(nd: py_ast.SetComp) -> ListCompr;
     def proc_slice(nd: py_ast.Slice) -> IndexSlice;

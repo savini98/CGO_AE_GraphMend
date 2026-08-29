@@ -885,6 +885,17 @@ obj CtrlStmt(CodeBlockStmt) {
     def postinit -> None;
 }
 
+obj ScopeDeclStmt(CodeBlockStmt) {
+    def accept_exit(v: UniPass) -> None;
+    def accept_enter(v: UniPass) -> None;
+
+    has kw: Token,
+        names: list[str],
+        is_nonlocal: bool = False;
+
+    def postinit -> None;
+}
+
 obj DeleteStmt(CodeBlockStmt) {
     def accept_exit(v: UniPass) -> None;
     def accept_enter(v: UniPass) -> None;

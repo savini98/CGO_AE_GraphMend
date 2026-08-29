@@ -607,8 +607,27 @@ impl PyastBuildPass.proc_pass(nd: py_ast.Pass) -> Semi {
     );
 }
 
-impl PyastBuildPass.proc_nonlocal(nd: py_ast.Nonlocal) -> Semi {
-    return self.proc_pass(cast(py_ast.Pass, nd));
+impl PyastBuildPass._scope_decl_stmt(
+    names: list[str], is_nonlocal: bool
+) -> ScopeDeclStmt {
+    kw_tok = Token(
+        orig_src=self.orig_src,
+        name=Tok.NAME,
+        value='nonlocal' if is_nonlocal else 'global',
+        line=0,
+        end_line=0,
+        col_start=0,
+        col_end=0,
+        pos_start=0,
+        pos_end=0
+    );
+    return ScopeDeclStmt(
+        kw=kw_tok, names=names, is_nonlocal=is_nonlocal, kid=[kw_tok]
+    );
+}
+
+impl PyastBuildPass.proc_nonlocal(nd: py_ast.Nonlocal) -> ScopeDeclStmt {
+    return self._scope_decl_stmt([str(n) for n in nd.names], True);
 }
 
 impl PyastBuildPass.proc_named_expr(nd: py_ast.NamedExpr) -> AtomUnit {
@@ -1077,8 +1096,8 @@ impl PyastBuildPass.proc_if_exp(nd: py_ast.IfExp) -> IfElseExpr {
     }
 }
 
-impl PyastBuildPass.proc_global(nd: py_ast.Global) -> Semi {
-    return self.proc_pass(cast(py_ast.Pass, nd));
+impl PyastBuildPass.proc_global(nd: py_ast.Global) -> ScopeDeclStmt {
+    return self._scope_decl_stmt([str(n) for n in nd.names], False);
 }
 
 impl PyastBuildPass.proc_generator_exp(nd: py_ast.GeneratorExp) -> GenCompr {

@@ -102,6 +102,7 @@ import from jaclang.compiler.frontend.unitree {
     RaiseStmt,
     ReportStmt,
     ReturnStmt,
+    ScopeDeclStmt,
     SemDef,
     Semi,
     SetCompr,
@@ -596,6 +597,7 @@ obj JcirGenPass(BaseAstGenPass[CgItem]) {
     def exit_jsx_expression(nd: JsxExpression) -> None;
     def exit_jsx_slot(nd: JsxSlot) -> None;
     def exit_jsx_comment(nd: JsxComment) -> None;
+    def exit_scope_decl_stmt(nd: ScopeDeclStmt) -> None;
     def exit_semi(nd: Semi) -> None;
     def exit_comment_token(nd: CommentToken) -> None;
 }

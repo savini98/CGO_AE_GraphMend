@@ -332,11 +332,40 @@ Extending to the rest of the paper's table needs its per-model batch selection
 (~70% of VRAM: 1345 for t5-small, 837 for MoLFormer-XL, 811 for bart-base, 20
 for t5-3b) rather than the token-sized shapes used here.
 
-### C10
+### C10, throughput
 
-Throughput is still not measured here. The authors' own comparison reports a
-3090 geomean of 0.981x over 17 newer models and 1.058x over the 7 original
-paper models, max 1.080x on the 3090 and 1.146x on the A40.
+Measured. RTX 3090, full pretrained weights, `mode="reduce-overhead"`, 5 warm-up
+iterations then 30 timed, with CUDA-graph launches per forward reported beside
+every number so an untransformed arm cannot pass as a result.
+
+| model | launches | batch 1 | batch 8 | large batch |
+|---|---|---|---|---|
+| t5-small | 4 -> 1 | 0.984x | 1.000x | 1.001x (b256) |
+| Phi-4-mini | 5 -> 1 | 1.008x | 1.005x (b4) | 1.002x (b16) |
+| **MoLFormer-XL** | **50 -> 1** | **1.70x** | 1.017x | 1.009x (b512) |
+
+**The gain tracks the number of launches eliminated, and shrinks as the batch
+grows.** MoLFormer sheds 49 of its 50 CUDA-graph launches, and at batch 1 that
+per-launch overhead is most of the time; by batch 512 the same model returns
+1.009x because compute dominates. t5-small and Phi-4-mini shed 3 and 4 launches
+and stay flat at every batch size.
+
+The batch-1 MoLFormer figure is four independent runs: 1.729x, 1.616x, 1.692x,
+1.755x. For scale, t5-small at batch 8 measured three times gives 1.000x,
+1.004x and 0.995x, so the noise band is about half a percent and 1.70x is far
+outside it.
+
+Against the paper's "5-8% higher end-to-end throughput": the large-batch numbers
+here sit **below** that range at roughly 0 to 2%, and small-batch MoLFormer sits
+far **above** it. Both are consistent with the authors' own comparison, which
+reports a 3090 geomean of 0.981x over 17 newer models and 1.058x over the 7
+original paper models, max 1.080x on the 3090 and 1.146x on the A40.
+
+It is also what the authors' own rebuttal predicts: "Small-batch,
+latency-critical serving would therefore see larger relative gains than we
+report, not smaller." That is measured here rather than argued, and it holds
+only on the model with many launches to remove. A model with three or four
+breaks does not benefit at any batch size.
 
 ### A note on the claim values
 
