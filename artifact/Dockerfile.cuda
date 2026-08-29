@@ -21,9 +21,22 @@
 #     --device /dev/nvidia0 --device /dev/nvidiactl \
 #     --device /dev/nvidia-uvm --device /dev/nvidia-uvm-tools \
 #     -v $D/libcuda.so.<VER>:$D/libcuda.so.1:ro \
+#     -v $D/libcuda.so.<VER>:$D/libcuda.so:ro \
 #     -v $D/libnvidia-ml.so.<VER>:$D/libnvidia-ml.so.1:ro \
 #     -v $D/libnvidia-ptxjitcompiler.so.<VER>:$D/libnvidia-ptxjitcompiler.so.1:ro \
+#     -e TRITON_LIBCUDA_PATH=$D \
 #     --entrypoint bash graphmend-cuda -lc '...'
+#
+# BOTH libcuda mounts are required, and the second one is easy to miss. The
+# versioned name is what the driver API resolves, so with only that,
+# torch.cuda.is_available() returns True, the device is named correctly, and a
+# matmul runs. Triton, which compiles the kernels Inductor emits, dlopens the
+# UNVERSIONED libcuda.so, and without it every compile fails with
+#
+#     AssertionError: libcuda.so cannot found!
+#
+# So the device checks and the graph-break counts pass while every timing run
+# dies, which is a confusing way to find out.
 #
 # <VER> is the host driver version, from `ls $D/libcuda.so.*`. Mounting a
 # libcuda that does not match the loaded kernel driver fails at cuInit, so read

@@ -433,10 +433,20 @@ docker run --rm \
   --device /dev/nvidia0 --device /dev/nvidiactl \
   --device /dev/nvidia-uvm --device /dev/nvidia-uvm-tools \
   -v $D/libcuda.so.<VER>:$D/libcuda.so.1:ro \
+  -v $D/libcuda.so.<VER>:$D/libcuda.so:ro \
   -v $D/libnvidia-ml.so.<VER>:$D/libnvidia-ml.so.1:ro \
   -v $D/libnvidia-ptxjitcompiler.so.<VER>:$D/libnvidia-ptxjitcompiler.so.1:ro \
+  -e TRITON_LIBCUDA_PATH=$D \
   --entrypoint bash graphmend-cuda -lc '...'
 ```
+
+**Both libcuda mounts are needed, and the second is easy to miss.** The
+versioned name is what the driver API resolves, so with only that,
+`torch.cuda.is_available()` is True, the device is named correctly, a matmul
+runs, and the graph-break counts reproduce. Triton, which compiles the kernels
+Inductor emits, dlopens the **unversioned** `libcuda.so`, and without it every
+compile fails with `AssertionError: libcuda.so cannot found!`. The symptom is
+that everything works until the first timing run.
 
 `<VER>` is the host's driver version, read from `ls $D/libcuda.so.*`. A libcuda
 that does not match the loaded kernel driver fails at `cuInit`, so read it
