@@ -418,8 +418,29 @@ torch 2.12.1+cu126   cuda 12.6   transformers 4.52.4
 torch.cuda.is_available()  True
 device                     NVIDIA GeForce RTX 3090
 4096x4096 matmul           executes
-t5-small through the harness, inside the image:  breaks off=3 on=0
+inductor + CUDA graphs     compiles and replays
 ```
+
+Break counts, measured inside the image:
+
+```
+t5-small                 breaks off=3 on=0
+MoLFormer-XL-both10pct   breaks off=5 on=0
+```
+
+And the cold-start claim itself, measured inside the image on t5-small:
+
+| | off | on | ratio |
+|---|---|---|---|
+| cold, compilation excluded | 2018.0 ms | 528.5 ms | **3.82x** |
+| raw window, not the metric | 8251.4 ms | 528.5 ms | 15.61x |
+| warm, median of replays | 9.869 ms | 9.893 ms | 0.998x |
+| CUDA-graph launches / forward | 4 | 1 | |
+
+3.82x in the container against 3.29x measured natively on the same machine, both
+inside the paper's 30-75%. **So the GPU claims are reproducible from the
+published image**, not only from a hand-built environment, which is what a
+reviewer will actually do.
 
 The host used for this has Docker **without** the NVIDIA Container Toolkit, so
 `--gpus all` is refused on it. The toolkit turns out not to be required. torch's

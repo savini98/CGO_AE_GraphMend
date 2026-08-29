@@ -62,12 +62,15 @@ batch 512 where compute dominates. Models shedding three or four launches gain
 nothing at any batch size. The batch-1 figure is four runs (1.729x, 1.616x,
 1.692x, 1.755x) against a noise band of about half a percent.
 
-**The CUDA image is GPU-verified.** It builds, reaches an RTX 3090 and runs
-GraphMend on it (t5-small, breaks off=3 on=0, measured inside the image). It
-does not need the NVIDIA Container Toolkit: torch's cu126 wheel vendors its own
-CUDA runtime, so passing the driver and device nodes through directly is
-enough, which needs no root and no Docker restart. The invocation is in the GPU
-section of [`artifact/RESULTS.md`](artifact/RESULTS.md).
+**The CUDA image is GPU-verified, and the GPU claims reproduce from it.**
+Measured inside the image on an RTX 3090: break counts t5-small 3 to 0 and
+MoLFormer-XL 5 to 0, and cold start on t5-small at **3.82x** (2018.0 ms to
+528.5 ms, launches 4 to 1) against 3.29x measured natively on the same machine.
+It does not need the NVIDIA Container Toolkit: torch's cu126 wheel vendors its
+own CUDA runtime, so passing the driver and the device nodes through directly is
+enough, with no root and no Docker restart. The exact invocation, including the
+second libcuda mount that Triton needs, is in the GPU section of
+[`artifact/RESULTS.md`](artifact/RESULTS.md).
 
 ## What it does not
 
