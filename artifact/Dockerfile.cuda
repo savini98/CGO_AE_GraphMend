@@ -1,41 +1,50 @@
 # GraphMend CGO 2027 artifact: CUDA image, for the latency and throughput
-# claims (paper claims C8, C9, C10: cold-start speedup up to 26x, steady-state
-# forward speedup 1.05x to 1.39x, throughput up to 15%).
+# claims C8, C9 and C10. The claim VALUES quoted in earlier drafts of this
+# artifact are unverified against the submission; see artifact/RESULTS.md.
 #
 # ============================================================================
-# BUILT, NOT GPU-EXERCISED. This image builds clean and its environment is
-# verified at build time (CUDA wheel, transformers, and a warm Jac compiler
-# cache -- see the RUN checks below). What has NOT been done is running it
-# against a physical GPU: the machine holding the RTX 3090 used for this work
-# has Docker but no nvidia-container-toolkit, so `--gpus all` is refused by
-# the daemon there and no container has ever seen the device.
+# BUILT AND GPU-VERIFIED. This image builds, reaches a physical GPU, and runs
+# GraphMend on it. Verified on an RTX 3090, driver 580.65.06:
 #
-# Concretely, verified:
-#   - the image builds, on linux/amd64
-#   - torch 2.12.1+cu126 installs and imports, and reports a CUDA build
-#   - the Jac toolchain runs and its compiler cache warms
-# Concretely, NOT verified:
-#   - `torch.cuda.is_available()` inside this image
-#   - anything the benchmark measures
+#   torch 2.12.1+cu126, cuda 12.6, transformers 4.52.4
+#   torch.cuda.is_available() True, device "NVIDIA GeForce RTX 3090"
+#   a 4096x4096 matmul executes
+#   t5-small break count through the harness: off=3 on=0
 #
-# The benchmark entrypoint is a stub and says so when run; the GPU numbers are
-# a separate track from this image. See artifact/README.md.
+# The host used for that has Docker WITHOUT the NVIDIA Container Toolkit, so
+# `--gpus all` is refused there. It is not needed. torch's cu126 wheel vendors
+# its own CUDA runtime, so all the container wants from the host is the driver
+# and the device nodes, and both can be passed through directly:
+#
+#   D=/usr/lib/x86_64-linux-gnu
+#   docker run --rm \
+#     --device /dev/nvidia0 --device /dev/nvidiactl \
+#     --device /dev/nvidia-uvm --device /dev/nvidia-uvm-tools \
+#     -v $D/libcuda.so.<VER>:$D/libcuda.so.1:ro \
+#     -v $D/libnvidia-ml.so.<VER>:$D/libnvidia-ml.so.1:ro \
+#     -v $D/libnvidia-ptxjitcompiler.so.<VER>:$D/libnvidia-ptxjitcompiler.so.1:ro \
+#     --entrypoint bash graphmend-cuda -lc '...'
+#
+# <VER> is the host driver version, from `ls $D/libcuda.so.*`. Mounting a
+# libcuda that does not match the loaded kernel driver fails at cuInit, so read
+# it rather than copying a version from here.
+#
+# With the toolkit installed, `--gpus all` is simpler and equivalent.
 # ============================================================================
 #
 # Intended use, from the REPOSITORY ROOT:
 #
 #   docker build -f artifact/Dockerfile.cuda -t graphmend-cuda .
-#   docker run --rm --gpus all graphmend-cuda            # prints the stub notice
+#   docker run --rm --gpus all graphmend-cuda t5-small
 #   docker run --rm --gpus all --entrypoint bash graphmend-cuda
 #
 # `--gpus all` needs the NVIDIA Container Toolkit on the host. Without it the
 # daemon fails with `could not select device driver "" with capabilities:
-# [[gpu]]`, which is a host configuration problem and not a problem with this
-# image.
+# [[gpu]]`; use the device passthrough above instead, which needs no toolkit
+# and no root.
 #
-# The break-elimination and correctness claims do NOT need this image. Use
-# artifact/Dockerfile.cpu for those; they are the claims this artifact actually
-# reproduces.
+# The break-elimination and correctness claims do not need a GPU at all. Use
+# artifact/Dockerfile.cpu for those; it is smaller and needs no device setup.
 
 # Same interpreter as the CPU image, and for a reason that is not cosmetic.
 # The obvious base here is nvidia/cuda:*-runtime-ubuntu24.04, but Ubuntu 24.04
@@ -95,8 +104,8 @@ RUN pip install \
 
 # Unlike the CPU image, this check must NOT assert cuda is None: here a CUDA
 # build is the point. It does not assert a GPU is visible either, because
-# `docker build` has no --gpus and the device only appears at run time. That
-# gap is exactly the "NOT verified" item in the header.
+# `docker build` has no access to a device: that can only be checked at run
+# time, and the header records the result of doing so.
 RUN python -c "import torch, transformers; \
 print('torch', torch.__version__, 'cuda:', torch.version.cuda); \
 print('transformers', transformers.__version__); \
@@ -125,7 +134,8 @@ RUN cd /opt/jaseci/jac \
 
 WORKDIR /opt/jaseci
 
-# The benchmark is a stub and says so when run. It is the entrypoint anyway,
-# so that running this image reports its own status rather than looking
-# plausible and producing a number nobody should quote.
+# The benchmark takes model names, so `docker run ... graphmend-cuda t5-small`
+# works and `--count` reports break counts instead of timings. It prints
+# CUDA-graph launches per arm beside every number, which is the check that the
+# transform actually fired: identical launch counts mean it did not.
 ENTRYPOINT ["python", "/opt/jaseci/artifact/gpu/bench.py"]

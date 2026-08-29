@@ -16,7 +16,7 @@ discrepancy has no reason to trust the disclosed ones.
 | NumPy | 2.4.6 |
 | Python | 3.13 |
 | CPU rows | `graphmend-cpu:2.12.1`, linux/amd64, `torch==2.12.1+cpu` |
-| GPU rows | RTX 3090, CUDA 12.6, `torch==2.12.1+cu126`, xformers 0.0.35 |
+| GPU rows | RTX 3090, CUDA 12.6, `torch==2.12.1+cu126`, xformers 0.0.35, driver 580.65.06 |
 | Toolchain | jaclang from this branch's source, on `PYTHONPATH`, not a pip install |
 | Harness | `jac/paper_eval/`, both arms under `jac run`, one subprocess per arm |
 | Metric | FX graphs handed to a counting Dynamo backend; `breaks = max(0, graphs - 1)` |
@@ -407,6 +407,45 @@ model with a first-use cache has it.
 What survives from that section is narrower and still true: a graph break can
 be load-bearing, in that fusing a region changes *when* first-use work happens
 relative to graph capture. Here that was recoverable with a warm-up.
+
+## The CUDA image, GPU-verified
+
+`artifact/Dockerfile.cuda` builds, reaches a physical GPU, and runs GraphMend on
+it. On an RTX 3090 with driver 580.65.06:
+
+```
+torch 2.12.1+cu126   cuda 12.6   transformers 4.52.4
+torch.cuda.is_available()  True
+device                     NVIDIA GeForce RTX 3090
+4096x4096 matmul           executes
+t5-small through the harness, inside the image:  breaks off=3 on=0
+```
+
+The host used for this has Docker **without** the NVIDIA Container Toolkit, so
+`--gpus all` is refused on it. The toolkit turns out not to be required. torch's
+cu126 wheel vendors its own CUDA runtime, so the only things the container needs
+from the host are the kernel driver and the device nodes, and Docker can pass
+both through directly with no root and no daemon restart:
+
+```bash
+D=/usr/lib/x86_64-linux-gnu
+docker run --rm \
+  --device /dev/nvidia0 --device /dev/nvidiactl \
+  --device /dev/nvidia-uvm --device /dev/nvidia-uvm-tools \
+  -v $D/libcuda.so.<VER>:$D/libcuda.so.1:ro \
+  -v $D/libnvidia-ml.so.<VER>:$D/libnvidia-ml.so.1:ro \
+  -v $D/libnvidia-ptxjitcompiler.so.<VER>:$D/libnvidia-ptxjitcompiler.so.1:ro \
+  --entrypoint bash graphmend-cuda -lc '...'
+```
+
+`<VER>` is the host's driver version, read from `ls $D/libcuda.so.*`. A libcuda
+that does not match the loaded kernel driver fails at `cuInit`, so read it
+rather than copying a version out of this document. Where the toolkit is
+installed, `--gpus all` is simpler and equivalent.
+
+This matters for a reviewer on a shared machine: installing the toolkit needs
+root and a Docker daemon restart, and a restart stops every running container
+that has no restart policy. The passthrough above avoids both.
 
 ## Reproducing
 

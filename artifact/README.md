@@ -421,9 +421,11 @@ latency number, it does not reproduce C8, and C10 is not measured at all. See
 the GPU section of `RESULTS.md`. This is the least complete part of the
 artifact.
 
-**Built but not exercised:** `Dockerfile.cuda`. It builds and its environment is
-verified at build time, but no container has ever seen a GPU, because the
-machine holding the RTX 3090 has Docker without the NVIDIA Container Toolkit.
+**Built and GPU-verified:** `Dockerfile.cuda`. It builds, reaches an RTX 3090,
+and runs GraphMend on it (t5-small, breaks off=3 on=0, measured inside the
+image). The host has Docker without the NVIDIA Container Toolkit, so `--gpus
+all` is refused there; the toolkit is not required, and the device-passthrough
+invocation that replaces it is in the GPU section of `RESULTS.md`.
 
 **Measured elsewhere and cited:** the CI timing for C1 (torch CPU install 15.3
 s, four suites 24.1 s on a 4 vCPU runner), from the repository's

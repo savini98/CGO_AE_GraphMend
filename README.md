@@ -62,6 +62,13 @@ batch 512 where compute dominates. Models shedding three or four launches gain
 nothing at any batch size. The batch-1 figure is four runs (1.729x, 1.616x,
 1.692x, 1.755x) against a noise band of about half a percent.
 
+**The CUDA image is GPU-verified.** It builds, reaches an RTX 3090 and runs
+GraphMend on it (t5-small, breaks off=3 on=0, measured inside the image). It
+does not need the NVIDIA Container Toolkit: torch's cu126 wheel vendors its own
+CUDA runtime, so passing the driver and device nodes through directly is
+enough, which needs no root and no Docker restart. The invocation is in the GPU
+section of [`artifact/RESULTS.md`](artifact/RESULTS.md).
+
 ## What it does not
 
 Stated here rather than left for a reviewer to discover:
@@ -73,9 +80,6 @@ Stated here rather than left for a reviewer to discover:
 - **Against the paper's stated ranges**, large-batch throughput sits below
   "5-8% higher" at roughly 0 to 2%, and small-batch MoLFormer sits far above it.
   Both are inside the authors' own spread.
-- **The CUDA image has never run against a physical GPU.** It builds and its
-  environment is verified at build time; the machine holding the GPU used for
-  this work has Docker without the NVIDIA Container Toolkit.
 - The repository's own test suite is **272 passed, 2 failed**. Both failures are
   cache-hit assertions that reproduce identically on the merge-base commit, so
   they pre-date this work.
