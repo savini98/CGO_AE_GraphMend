@@ -74,6 +74,9 @@ for cfg in default paper; do
     rule
     if [ "$cfg" = "paper" ]; then
         echo "STEADY STATE, the paper's batch sizes (t5-small 1345, MoLFormer 837)"
+        echo "  note: t5-small at batch 1345 does not fit in 24 GB and reports"
+        echo "  'no measurement' on an RTX 3090. Both arms fail identically, so"
+        echo "  that is a capacity limit of this card rather than a result."
         FLAG=(--paper-batch)
     else
         echo "STEADY STATE, this benchmark's default batch"

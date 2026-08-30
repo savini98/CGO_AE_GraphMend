@@ -424,6 +424,19 @@ mis-configured benchmark, because the configuration now reproduces the authors'
 per-iteration times to 1%. A reviewer who matches the paper's setup this
 closely will measure roughly 1.03x, not 1.13x.
 
+`gpu/run_open_questions.sh` measures the same thing from a clean clone, at both
+batch sizes, and agrees:
+
+| model | default batch | paper batch |
+|---|---|---|
+| t5-small | 0.991x | does not fit in 24 GB |
+| MoLFormer-XL | 0.997x | 1.011x |
+| Phi-4-mini | 1.004x | 1.003x |
+
+t5-small at the paper's batch of 1345 exceeds this card's 24 GB and reports no
+measurement. Both arms fail identically, so that is a capacity limit of the
+RTX 3090 rather than a result.
+
 Cold start on the same run reaches 5.57x. Running the authors' own script
 settles where the rest of the difference comes from.
 

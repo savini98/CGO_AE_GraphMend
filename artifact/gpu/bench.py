@@ -417,7 +417,18 @@ def run(key, on, count):
         for ln in reversed(p.stdout.strip().splitlines()):
             if ln.startswith("GMBENCH10 "):
                 return json.loads(ln[len("GMBENCH10 "):])
-        return {"key": key, "error": (p.stderr.strip() or p.stdout.strip())[-500:]}
+        # Keep the exception line, not just the tail. A traceback's most useful
+        # line is its last "SomeError: message", and slicing the last 500
+        # characters drops exactly that whenever the frames below it are deep,
+        # which is how a plain CUDA OOM at a large --paper-batch arrives here
+        # looking like an anonymous stack fragment.
+        import re as _re
+        err = (p.stderr.strip() or p.stdout.strip())
+        _pat = r"^[A-Za-z_][\w.]*(Error|Exception|Interrupt):"
+        exc = next((s for s in (ln.strip() for ln in reversed(err.splitlines()))
+                    if _re.match(_pat, s)), "")
+        return {"key": key,
+                "error": (exc + "\n" if exc else "") + err[-500:]}
     finally:
         for d in (wd, icache, tcache):
             shutil.rmtree(d, ignore_errors=True)
