@@ -101,3 +101,16 @@ jacllvm.dll
 libjacpyembed.so
 libjacpyembed.dylib
 jacpyembed.dll
+
+# jaclang/lib/ is SOURCE, not build output. The `lib/` rule in the packaging
+# section above is meant for Python build directories, but it matches this one
+# too, and the toolchain's bootstrap manifest requires jaclib.jac at run time.
+# A clone missing it fails every single jac command with
+#
+#   RuntimeError: bootstrap_manifest: seed module 'lib/jaclib.jac' does not
+#   exist under .../jaclang
+#
+# In the upstream repository these files predate the ignore rule, so they stay
+# tracked and the problem is invisible there. This repository was populated by
+# copying a checkout, where the rule applied and silently dropped them.
+!jaclang/lib/
