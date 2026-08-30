@@ -186,9 +186,16 @@ relative to the repository root.
 | C5 | Table 2 rows that are correctly **not** fixed: longformer 40%, clap 0% | `PYTHONPATH=$PWD python -m paper_eval.run_eval longformer-base-4096 clap-htsat-fused` | `5 -> 3` (40%) and `2 -> 2` (0%). A clean sweep here would be the failure | CPU | ~10 to 25 min cold (est.) |
 | C6 | Break-cause attribution (Table 2's DC / LC / VG / DS / DO / TI column) | `PYTHONPATH=$PWD python -m paper_eval.run_why longformer-base-4096 on` | Per-break reason text and source location, so a surviving break can be checked against the paper's declared out-of-scope category | CPU | ~3 to 10 min per model (est.) |
 | C7 | The 6 network rows (Hub remote code, `trust_remote_code`) | `PYTHONPATH=$PWD python -m paper_eval.run_eval Florence-2 MoLFormer-XL-both10pct chronos-bolt-small Qwen-Audio-Chat stella-en-400M-v5 moe-minicpm-x4-base` | See the network table below. All 6 match Table 2; `stella-en-400M-v5` needs CUDA and xformers and cannot be measured in the CPU image | CPU + network | ~1 to 2 h plus downloads (est.) |
-| C8 | Cold-start forward pass speedup, up to 26x (5x on average) | `python ../artifact/gpu/bench.py <model>` | Reported two ways, see the GPU section of [`RESULTS.md`](RESULTS.md): the raw region-window ratio, which is Table 2's metric, and the same window with compilation subtracted from both arms | NVIDIA GPU | ~10 min/model |
-| C9 | Steady-state forward pass speedup, up to 1.39x | same | `warm (median)` in the same output | NVIDIA GPU | included above |
-| C10 | Throughput improvement, up to 15% | `python ../artifact/gpu/bench.py --throughput <model>` | Throughput off and on with CUDA-graph launch counts beside them | NVIDIA GPU | ~10 min/model |
+| C8 | Cold-start forward pass speedup, 5x on average | `bash artifact/gpu/run_reproducible.sh` | PASS per model, with the cold ratio reported two ways (raw region window, which is Table 2's metric, and the same window with compilation subtracted from both arms) and CUDA-graph launches going 4->1, 50->1, 5->1. **Exits non-zero on failure** | NVIDIA GPU | ~30 min, 3 models |
+| C9 | Steady-state forward pass speedup, up to 1.39x | `bash artifact/gpu/run_open_questions.sh` | Warm medians per arm. **Does not reproduce**: measures about 1.03x against Table 2's 1.13x. This script reports and never gates, so it always exits 0 | NVIDIA GPU | ~30 min, 3 models |
+| C10 | Throughput improvement, up to 15% | same | Reproduces only where the mechanism applies: MoLFormer-XL gains about 70% at batch 1 where it sheds 49 of 50 CUDA-graph launches, and nothing at large batch | NVIDIA GPU | included above |
+
+The two GPU scripts are split on purpose. `run_reproducible.sh` carries fixed
+expected values and a real exit status, so it can be run as a check.
+`run_open_questions.sh` covers the claims this artifact could not reconcile with
+Table 2, and always exits 0, because a reviewer re-measuring them should see the
+numbers rather than a red failure. `gpu/bench.py` underlies both and can still
+be called directly for a single model.
 
 Wall-clock figures marked `(est.)` are estimates, not stopwatch measurements.
 The only timing we measured is the CI figure in C1. The dominant cost in C2 to
@@ -371,12 +378,14 @@ file uses a function-scope `global`, but a reviewer who writes the obvious
 | `RESULTS.md` | The measured results table, all 27 rows, with matching and non-matching rows separated. |
 | `APPENDIX.md` | Two-page artifact appendix draft in the ctuning structure, for pasting into LaTeX. |
 | `Dockerfile.cpu` | CPU image for the break-elimination and correctness claims. Pins torch 2.12.1 and transformers 4.52.4, builds the toolchain from this branch's source. Built and verified; every break-elimination number was measured inside it. |
-| `Dockerfile.cuda` | GPU image for the latency and throughput claims. Builds; torch 2.12.1+cu126 and the toolchain are verified at build time. **Never run against a physical GPU** (the machine with the RTX 3090 has Docker but no NVIDIA Container Toolkit, so `--gpus all` is refused there). |
+| `Dockerfile.cuda` | GPU image for the latency and throughput claims. Built and GPU-verified on an RTX 3090 (driver 580.65.06): torch 2.12.1+cu126 reaches the device and GraphMend runs on it. The host has no NVIDIA Container Toolkit, so `--gpus all` is refused there; the device-passthrough recipe in the file's header needs no toolkit and no root. |
 | `fetch_typeshed.py` | Materializes the gitignored typeshed stdlib stubs at the pinned commit, checksum-verified. Both images run it. Without it no Jac compile works at all, so a fresh clone needs it too. |
 | `run_all.sh` | One-command kick-the-tires path, CPU only, prints PASS/FAIL and exits non-zero on failure. |
 | `jac.toml` | Project config that enables `graphmend_claim_imports`, so hand-typed commands in this directory behave like the harness. |
 | `minimal_example.py` | Smallest correct own-script template. Demonstrates both gotchas. Run it with `jac run`, never with `python`. |
-| `gpu/bench.py` | GPU benchmark for C8 to C10. Still a stub; the measurements that exist were taken with the full-pretrained-weight benchmark described in the GPU section of `RESULTS.md`, and only t5-small completed. |
+| `gpu/run_reproducible.sh` | The GPU claims that reproduce: break elimination on device, CUDA-graph launch counts, and C8 cold start. Fixed expected values, prints PASS/FAIL, **exits non-zero on failure**. The GPU counterpart of `run_all.sh`. |
+| `gpu/run_open_questions.sh` | The GPU claims that do not reproduce: C9 steady state and C10 throughput. Reports numbers only and **always exits 0**, so it is a measurement rather than a check. |
+| `gpu/bench.py` | The benchmark both GPU scripts drive. Builds each model from real pretrained weights, measures through the PyTorch profiler, and gives each arm a private TorchInductor cache so cold start is genuinely cold. `--count` reports break counts, `--json` emits machine-readable results, `--paper-batch` selects the paper's per-model batch sizes. |
 
 The harness itself is [`../jac/paper_eval/`](../jac/paper_eval/README.md):
 `registry.py` (per-model builder plus transform scope), `run_eval.py` (two-arm

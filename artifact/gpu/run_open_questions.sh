@@ -81,8 +81,10 @@ for cfg in default paper; do
     fi
     rule
 
+    # Invoked from jac/: bench.py derives PYTHONPATH and PAPER_EVAL_DIR for its
+    # arm subprocesses from the working directory.
     OUT="$LOG_DIR/steady-$cfg.json"
-    "$PYTHON" "$GPU_DIR/bench.py" --json "${FLAG[@]}" "${MODELS[@]}" \
+    ( cd "$REPO/jac" && "$PYTHON" "$GPU_DIR/bench.py" --json "${FLAG[@]}" "${MODELS[@]}" ) \
         > "$OUT" 2> "$LOG_DIR/steady-$cfg.err"
     tail -1 "$OUT" > "$OUT.line" 2>/dev/null
 
