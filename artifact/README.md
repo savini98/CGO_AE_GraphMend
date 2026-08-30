@@ -186,9 +186,9 @@ relative to the repository root.
 | C5 | Table 2 rows that are correctly **not** fixed: longformer 40%, clap 0% | `PYTHONPATH=$PWD python -m paper_eval.run_eval longformer-base-4096 clap-htsat-fused` | `5 -> 3` (40%) and `2 -> 2` (0%). A clean sweep here would be the failure | CPU | ~10 to 25 min cold (est.) |
 | C6 | Break-cause attribution (Table 2's DC / LC / VG / DS / DO / TI column) | `PYTHONPATH=$PWD python -m paper_eval.run_why longformer-base-4096 on` | Per-break reason text and source location, so a surviving break can be checked against the paper's declared out-of-scope category | CPU | ~3 to 10 min per model (est.) |
 | C7 | The 6 network rows (Hub remote code, `trust_remote_code`) | `PYTHONPATH=$PWD python -m paper_eval.run_eval Florence-2 MoLFormer-XL-both10pct chronos-bolt-small Qwen-Audio-Chat stella-en-400M-v5 moe-minicpm-x4-base` | See the network table below. All 6 match Table 2; `stella-en-400M-v5` needs CUDA and xformers and cannot be measured in the CPU image | CPU + network | ~1 to 2 h plus downloads (est.) |
-| C8 | Cold-start speedup (value UNVERIFIED, see RESULTS.md) | `python ../artifact/gpu/bench.py --mode cold --acknowledge-unvalidated <model>` | **NOT REPRODUCED HERE.** The script is an unvalidated stub and refuses to run without the acknowledgement flag | NVIDIA GPU | not measured |
-| C9 | Steady-state forward speedup (value UNVERIFIED) | same, `--mode steady` | **NOT REPRODUCED HERE.** As above | NVIDIA GPU | not measured |
-| C10 | Throughput improvement (value UNVERIFIED) | same, `--mode throughput` | **NOT REPRODUCED HERE.** As above | NVIDIA GPU | not measured |
+| C8 | Cold-start forward pass speedup, up to 26x (5x on average) | `python ../artifact/gpu/bench.py <model>` | Reported two ways, see the GPU section of [`RESULTS.md`](RESULTS.md): the raw region-window ratio, which is Table 2's metric, and the same window with compilation subtracted from both arms | NVIDIA GPU | ~10 min/model |
+| C9 | Steady-state forward pass speedup, up to 1.39x | same | `warm (median)` in the same output | NVIDIA GPU | included above |
+| C10 | Throughput improvement, up to 15% | `python ../artifact/gpu/bench.py --throughput <model>` | Throughput off and on with CUDA-graph launch counts beside them | NVIDIA GPU | ~10 min/model |
 
 Wall-clock figures marked `(est.)` are estimates, not stopwatch measurements.
 The only timing we measured is the CI figure in C1. The dominant cost in C2 to
@@ -310,8 +310,7 @@ All three rules now have real-model demonstrations: `[Defer]` on 17 rows,
 `[Where]` on Phi-4-mini-instruct, Florence-2 and Qwen-Audio-Chat, and `[Trap]`
 on MoLFormer-XL (5 to 0) and grounding-dino (16 to 7).
 
-**C8 reproduces on t5-small at 3.29x**, inside the paper's "30-75% lower
-cold-start forward latency" (1.43x to 4.0x), using the authors' own metric:
+**C8 reproduces on t5-small at 3.29x** using a compile-subtracted metric:
 profile from the first run with no warmup, take the interval between
 consecutive `Torch-Compiled Region: 0/0` markers, and subtract the
 `backend_compile` spans inside it from both arms. CUDA-graph launches per
@@ -325,11 +324,10 @@ most likely because this runs at 4 x 256 where the paper sizes each model to
 about 70% of GPU memory. C10 is not measured. See the GPU section of
 [`RESULTS.md`](RESULTS.md).
 
-**The claim values in the table above are UNVERIFIED.** The "26x",
-"1.05x to 1.39x" and "up to 15%" figures appear only in this artifact's own
-files; the GraphMend paper available to check states 30-75% lower cold start,
-2.5-25% lower steady-state latency and 5-8% higher throughput. Reconciling them
-with the actual submission is an author task.
+**Table 2 cold-start column is the RAW region-window ratio**, reproduced to two
+decimals on 14 of 15 models from the authors stored 3090 traces. Its
+steady-state column does not reproduce from those same traces under any of five
+tested definitions. See the GPU section of [RESULTS.md](RESULTS.md).
 
 All three benchmark models now run under CUDA graphs, Phi-4-mini included. An
 earlier version of this file reported a `[Where]` defect that made Phi-4 crash

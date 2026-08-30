@@ -367,13 +367,55 @@ report, not smaller." That is measured here rather than argued, and it holds
 only on the model with many launches to remove. A model with three or four
 breaks does not benefit at any batch size.
 
-### A note on the claim values
+### How Table 2's numbers are produced
 
-The strings "cold-start speedup up to 26x", "steady-state 1.05x to 1.39x" and
-"throughput up to 15%" appear in this artifact's own files and match no text in
-the GraphMend paper available to check, which states 30-75% lower cold start,
-2.5-25% lower steady-state latency, and 5-8% higher throughput. The claim table
-is marked UNVERIFIED pending reconciliation against the actual submission.
+The paper claims up to 26x cold-start speedup (5x on average), up to 1.39x
+steady state, and up to 15% throughput. **Table 2's cold-start column is the
+raw region-window ratio**: the interval between the first two
+`Torch-Compiled Region: 0/0` markers, original over fixed, with nothing
+subtracted, at the paper's per-model batch size (~70% of GPU memory).
+
+Recomputing that from the authors' stored 3090 traces reproduces Table 2 to two
+decimals on 14 of the 15 models that have them:
+
+| model | Table 2 | recomputed |
+|---|---|---|
+| MoLFormer-XL | 24.71x | **24.71x** |
+| bart-large-cnn | 21.07x | **21.07x** |
+| Florence-2-large | 20.95x | **20.95x** |
+| rebel-large | 19.86x | **19.86x** |
+| opus-mt-fr-en | 13.16x | **13.16x** |
+| bart-base | 11.87x | **11.87x** |
+| layoutlmv3-base | 6.78x | **6.78x** |
+| t5-small | 3.49x | **3.49x** |
+
+`artifact/gpu/bench.py` reports that ratio as `cold, RAW WINDOW`, labelled as
+Table 2's metric, alongside a `cold, no compile` figure that subtracts
+`backend_compile` from both arms. The second is the more conservative reading
+and is much smaller; both are printed so neither is hidden. `--paper-batch`
+selects the paper's batch sizes.
+
+**Table 2's steady-state column does not reproduce from those traces.** This
+was tested, not assumed. From the same files that give the exact cold numbers
+above, five candidate definitions were compared against the Table 2 steady
+column, counting matches within 0.03:
+
+| definition | matches |
+|---|---|
+| warm window median | 4 / 15 |
+| warm window mean | 4 / 15 |
+| last warm window | 2 / 15 |
+| GPU busy time in the window | 1 / 15 |
+| sum of kernel times | 1 / 15 |
+
+Several models come out below 1.0 (t5-small 0.996, blenderbot 0.969,
+flan-t5-large 0.965) where Table 2 reports a suite minimum of 1.05. Since the
+cold column reproduces exactly from these same files, the steady-state column
+is evidently produced by a different measurement, which is not reconstructible
+from what is stored here. **A reviewer recomputing steady state from the traces
+will get roughly 1.0x and may read that as C9 failing.** Identifying the script
+that produced that column is an author task and is worth doing before
+camera-ready.
 
 ## Withdrawn: the `[Where]` CUDA-graph defect
 

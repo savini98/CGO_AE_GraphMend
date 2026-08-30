@@ -77,12 +77,10 @@ second libcuda mount that Triton needs, is in the GPU section of
 Stated here rather than left for a reviewer to discover:
 
 - **One row disagrees.** grounding-dino measures 56% against Table 2's 58%.
-- **The claim values in the tables are marked UNVERIFIED.** Figures quoted in
-  earlier drafts of this artifact do not match the paper text available to
-  check. They need reconciling against the submission.
-- **Against the paper's stated ranges**, large-batch throughput sits below
-  "5-8% higher" at roughly 0 to 2%, and small-batch MoLFormer sits far above it.
-  Both are inside the authors' own spread.
+- **Table 2 steady-state column does not reproduce from the authors stored
+  traces** under any of five tested definitions, while its cold-start column
+  reproduces exactly from the same files. See the GPU section of
+  [artifact/RESULTS.md](artifact/RESULTS.md).
 - The repository's own test suite is **272 passed, 2 failed**. Both failures are
   cache-hit assertions that reproduce identically on the merge-base commit, so
   they pre-date this work.

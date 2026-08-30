@@ -23,6 +23,28 @@ which is a correct measurement of the wrong thing.
 STEADY STATE. The median of the remaining region-0/0 intervals, which are
 replays.
 
+STEADY STATE DOES NOT REPRODUCE FROM THE TRACES, and this was tested rather
+than assumed. Over the 15 models with stored 3090 traces, the RAW WINDOW cold
+metric above reproduces Table 2 exactly for 14 of them, to two decimals:
+Florence-2-large 20.95, MoLFormer-XL 24.71, bart-large-cnn 21.07, rebel-large
+19.86, opus-mt-fr-en 13.16, bart-base 11.87, t5-small 3.49, and so on. From the
+SAME trace files, five candidate definitions of steady state were computed and
+compared against Table 2 steady column, matching within 0.03:
+
+    warm window median      4 / 15
+    warm window mean        4 / 15
+    last warm window        2 / 15
+    GPU busy time in window 1 / 15
+    sum of kernel times     1 / 15
+
+Several models come out below 1.0 (t5-small 0.996, blenderbot 0.969,
+flan-t5-large 0.965) where Table 2 reports a minimum of 1.05 across the suite.
+
+So Table 2 cold column is the raw window ratio, and its steady-state column is
+produced by some measurement not reconstructible from these traces. What this
+benchmark prints for warm is the window median: reproducible, stated, and NOT
+the quantity Table 2 reports.
+
 Both arms load FULL PRETRAINED checkpoints, because latency depends on real
 layer counts and widths, and both run under `jac run` with their own jac.toml:
 the entry program has to be Jac-compiled or every [Defer] rewrite stays inert
@@ -44,6 +66,17 @@ paper's CUDA-graph setup.
 import argparse, json, os, shutil, statistics, subprocess, sys, tempfile
 
 ARM = "GM_BENCH10_ARM"
+
+# Per-model batch sizes the paper uses on an RTX 3090, from run_all_3090_new.log
+# in the authors' research repository. The paper sizes each model to about 70%
+# of GPU memory and runs the original and fixed variants at the same batch, so a
+# comparison at any other batch is measuring a different point. --paper-batch
+# selects these; without it the small defaults in build() apply, which are fine
+# for break counting and understate the cold-start ratio.
+PAPER_BATCH_3090 = {
+    "t5-small": 1345,
+    "MoLFormer-XL-both10pct": 837,
+}
 _TOML = "[run]\ngraphmend = {on}\ngraphmend_claim_imports = {on}\n"
 
 
@@ -373,6 +406,8 @@ def run(key, on, count):
         env = dict(os.environ, PYTHONPATH=repo, PAPER_EVAL_DIR=repo,
                    GM_MODEL=key, TORCHINDUCTOR_CACHE_DIR=icache,
                    TRITON_CACHE_DIR=tcache, **{ARM: "1"})
+        if os.environ.get("GM_BENCH10_PAPER_BATCH") and key in PAPER_BATCH_3090:
+            env["GM_BENCH10_BATCH"] = str(PAPER_BATCH_3090[key])
         if count:
             env["GM_BENCH10_COUNT"] = "1"
         p = subprocess.run([sys.executable, "-m", "jaclang", "run", "bench10.py"],
@@ -389,9 +424,16 @@ def run(key, on, count):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("models", nargs="+")
+    ap.add_argument("--paper-batch", action="store_true",
+                    help="use the paper's per-model 3090 batch sizes "
+                         "(t5-small 1345, MoLFormer-XL 837). The paper sizes "
+                         "each model to about 70%% of GPU memory; the small "
+                         "defaults understate the cold-start ratio.")
     ap.add_argument("--count", action="store_true",
                     help="report graph breaks per arm instead of latency")
     o = ap.parse_args()
+    if getattr(o, "paper_batch", False):
+        os.environ["GM_BENCH10_PAPER_BATCH"] = "1"
     for key in o.models:
         off, on = run(key, False, o.count), run(key, True, o.count)
         if off.get("error") or on.get("error"):
@@ -414,12 +456,25 @@ def main():
             # paper's definition; the raw window and the compile time it
             # subtracts are printed too, so the subtraction is checkable
             # rather than something the reader has to take on trust.
-            print(f"  cold (no compile) off={off['cold_ms']:9.1f}ms "
-                  f"on={on['cold_ms']:9.1f}ms  speedup={off['cold_ms']/on['cold_ms']:.2f}x")
-            print(f"    raw window      off={off['cold_window_ms']:9.1f}ms "
-                  f"on={on['cold_window_ms']:9.1f}ms   "
-                  f"(window ratio {off['cold_window_ms']/on['cold_window_ms']:.2f}x, "
-                  f"NOT the metric)")
+            # Two cold-start numbers, because the paper and this artifact
+            # measured different things and both are worth having.
+            #
+            # RAW WINDOW is Table 2's metric: the interval between the first two
+            # "Torch-Compiled Region: 0/0" markers, original over fixed, with
+            # nothing subtracted. Verified against the authors' own 3090
+            # MoLFormer traces, where it gives 6200.7 / 250.9 = 24.71x, the
+            # value printed in Table 2.
+            #
+            # NO-COMPILE subtracts backend_compile from both arms, following
+            # cold_start_no_compile.py in the authors' repository, on the
+            # grounds that merging subgraphs does not reduce total compile work.
+            # It is the more conservative number and it is much smaller.
+            print(f"  cold, RAW WINDOW  off={off['cold_window_ms']:9.1f}ms "
+                  f"on={on['cold_window_ms']:9.1f}ms  "
+                  f"speedup={off['cold_window_ms']/on['cold_window_ms']:.2f}x   <- Table 2 metric")
+            print(f"  cold, no compile  off={off['cold_ms']:9.1f}ms "
+                  f"on={on['cold_ms']:9.1f}ms  "
+                  f"speedup={off['cold_ms']/on['cold_ms']:.2f}x   (conservative)")
             print(f"    compile inside  off={off['cold_compile_ms']:9.1f}ms "
                   f"on={on['cold_compile_ms']:9.1f}ms")
             print(f"  warm (median)     off={off['warm_ms']:9.3f}ms "

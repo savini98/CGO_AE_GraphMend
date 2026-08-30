@@ -1,6 +1,7 @@
 # GraphMend CGO 2027 artifact: CUDA image, for the latency and throughput
-# claims C8, C9 and C10. The claim VALUES quoted in earlier drafts of this
-# artifact are unverified against the submission; see artifact/RESULTS.md.
+# claims C8, C9 and C10: up to 26x cold-start forward pass speedup (5x on
+# average), up to 1.39x steady-state forward pass speedup, and up to 15%
+# throughput improvement, on NVIDIA RTX 3090, A40 and H100.
 #
 # ============================================================================
 # BUILT AND GPU-VERIFIED. This image builds, reaches a physical GPU, and runs
