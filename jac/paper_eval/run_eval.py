@@ -16,6 +16,7 @@ are out of scope here. Run with the repo jaclang on PYTHONPATH:
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -62,10 +63,28 @@ def _run(key: str, mode: str, state: str = "") -> dict:
                 row = json.loads(line[len("GMRESULT "):])
                 row["mode"] = mode
                 return row
-        tail = (p.stderr.strip() or p.stdout.strip())[-200:]
+        # Lead with the exception line and the exit code rather than a bare
+        # tail. A 200-character tail of a run that died mid-compile is just
+        # compiler progress output, which says nothing about the cause, and a
+        # SIGKILLed arm writes no traceback at all: the OOM killer takes the
+        # process while GraphMend is compiling the imported modeling code, and
+        # the row then reports ERR for what is really a memory ceiling.
+        err = (p.stderr.strip() or p.stdout.strip())
+        head = ""
+        if p.returncode in (-9, 137):
+            head = (f"killed by SIGKILL (exit {p.returncode}), almost certainly "
+                    "out of memory: give Docker at least 10 GB, see the "
+                    "troubleshooting section of artifact/README.md")
+        else:
+            head = next(
+                (s for s in (ln.strip() for ln in reversed(err.splitlines()))
+                 if re.match(r"^[A-Za-z_][\w.]*(Error|Exception|Interrupt):", s)),
+                "")
+        tail = err[-200:]
         return {"key": key, "mode": mode, "graphs": None, "breaks": None,
                 "out_hash": None, "in_shape": None,
-                "error": tail or f"no GMRESULT (exit {p.returncode})"}
+                "error": (head + " || " if head else "")
+                         + (tail or f"no GMRESULT (exit {p.returncode})")}
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 

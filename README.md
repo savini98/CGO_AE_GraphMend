@@ -20,6 +20,12 @@ docker build -f artifact/Dockerfile.cpu -t graphmend-cpu .   # ~5 min
 docker run --rm graphmend-cpu
 ```
 
+**Give Docker at least 10 GB of memory.** `Phi-4-mini-instruct` peaks near
+8.8 GB while GraphMend compiles the imported `transformers` modeling code, and
+it is in both the default set and `--quick`. Under that ceiling the container
+is SIGKILLed and the row reports `ERR` with exit 137. Check the current limit
+with `docker info | grep "Total Memory"`.
+
 Expect `All checks passed.` and exit status 0: four rule-level suites
 (18 tests) and five model rows, on CPU, with no network and no weight download.
 `--quick` runs a shorter set.

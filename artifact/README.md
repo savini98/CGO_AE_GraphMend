@@ -414,9 +414,37 @@ interpreter running the toolchain. `run_all.sh` fails on this rather than
 passing an empty session. Check that `python -m jaclang` and your `torch` are
 the same interpreter.
 
+**The rule suites report `N error` with `DeprecationWarning:
+torch.jit.script_method is deprecated`.** Seen on a native (non-container) run
+against a torch 2.12.1 CUDA build: 7 passed, 11 error. The warning is raised
+inside torch itself, from `torch/utils/mkldnn.py` by way of
+`torch._inductor.fx_passes.post_grad`, on the first `torch._dynamo.reset()`,
+and the Jac test runner escalates DeprecationWarning to an error.
+`PYTHONWARNINGS` does not suppress it, because the runner sets its own filters.
+It is not a GraphMend result and no rule is involved. The same suites give
+`18 passed, 0 skipped` in the CPU image, which is the supported path:
+
+```bash
+docker build -f artifact/Dockerfile.cpu -t graphmend-cpu .
+docker run --rm graphmend-cpu --suites
+```
+
 **A row reads `ERR`.** The model failed to build or run. Re-run that key alone
 to see the captured error text: `run_eval` prints the tail of stderr for the
 failing arm.
+
+**A row reads `ERR` and the container exited 137.** 137 is SIGKILL from the
+out-of-memory killer, and it is a memory ceiling rather than a result. Give
+Docker at least **10 GB** and re-run. `Phi-4-mini-instruct` is the peak row at
+about 8.8 GB resident, measured with `/usr/bin/time -v`, and it is in both the
+default set and `--quick`, so a small Docker memory allocation fails the first
+command a reviewer types. Docker Desktop's default is often well under that:
+check with `docker info | grep "Total Memory"` and raise it in
+Settings, Resources, Memory.
+
+The cost is GraphMend compiling the imported `transformers` modeling code
+through the Jac front end, not the model weights. Every model here is built
+from a small random-weight config; Phi-4-mini is 2 layers with hidden size 128.
 
 **A row shows `MISMATCH` next to the input shape.** The two arms did not see
 the same input, so the `output_ok` comparison on that row means nothing.
