@@ -433,11 +433,19 @@ def main():
                          "defaults understate the cold-start ratio.")
     ap.add_argument("--count", action="store_true",
                     help="report graph breaks per arm instead of latency")
+    ap.add_argument("--json", action="store_true",
+                    help="emit the paired off/on results as one JSON object "
+                         "instead of the human-readable report. The two "
+                         "checked runners beside this file consume it.")
     o = ap.parse_args()
     if getattr(o, "paper_batch", False):
         os.environ["GM_BENCH10_PAPER_BATCH"] = "1"
+    collected = {}
     for key in o.models:
         off, on = run(key, False, o.count), run(key, True, o.count)
+        if o.json:
+            collected[key] = {"off": off, "on": on}
+            continue
         if off.get("error") or on.get("error"):
             print(f"{key}: ERR\n  off: {off.get('error')}\n  on: {on.get('error')}")
             continue
@@ -491,6 +499,8 @@ def main():
                   f"syncs off={off.get('syncs')} on={on.get('syncs')}")
             print(f"  windows off ms: {[round(x,1) for x in off['all_windows_ms']]}")
             print(f"  windows on  ms: {[round(x,1) for x in on['all_windows_ms']]}")
+    if o.json:
+        print(json.dumps(collected))
     return 0
 
 
