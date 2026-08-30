@@ -435,12 +435,24 @@ failing arm.
 
 **A row reads `ERR` and the container exited 137.** 137 is SIGKILL from the
 out-of-memory killer, and it is a memory ceiling rather than a result. Give
-Docker at least **10 GB** and re-run. `Phi-4-mini-instruct` is the peak row at
-about 8.8 GB resident, measured with `/usr/bin/time -v`, and it is in both the
-default set and `--quick`, so a small Docker memory allocation fails the first
-command a reviewer types. Docker Desktop's default is often well under that:
-check with `docker info | grep "Total Memory"` and raise it in
-Settings, Resources, Memory.
+Docker at least **12 GB** and re-run. `Phi-4-mini-instruct` is the peak row and
+it is in both the default set and `--quick`, so too small an allocation fails
+the first command a reviewer types.
+
+Measured on an aarch64 host, where the whole default set passes at 11.65 GiB
+and the container peaks at 9.727 GiB:
+
+| Docker memory | result |
+|---|---|
+| 5.77 GiB | Phi-4 SIGKILLed |
+| 9.69 GiB | Phi-4 SIGKILLed |
+| 11.65 GiB | all rows pass |
+
+Check the current limit with `docker info | grep "Total Memory"`. On Docker
+Desktop raise it in Settings, Resources, Memory. On Colima it is
+`colima stop && colima start --memory 12`. Note that 8.8 GB, the peak resident
+size of the same row run natively on x86_64, is NOT enough here: budget from
+the table above rather than from a native measurement.
 
 The cost is GraphMend compiling the imported `transformers` modeling code
 through the Jac front end, not the model weights. Every model here is built
