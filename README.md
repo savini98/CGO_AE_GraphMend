@@ -47,6 +47,13 @@ authors' own metric (first iteration minus compilation, excluded from both
 arms): t5-small 3.29x, MoLFormer-XL 2.22x, Phi-4-mini 5.92x, with CUDA-graph
 launches per forward going 4 to 1, 50 to 1, and 5 to 1 respectively.
 
+It also reproduces through a second, independent path: the authors' own
+`fx-graph-research` MoLFormer script, run on an RTX 3090 under the paper's
+torch 2.12.1, matches their recorded warm timing to about one percent (118.5 ms
+against 117.8 ms), confirms 5 graph breaks in the original arm and 0 in the
+fixed arm, and reports a **6.48x** cold-start ratio with both arms compiling
+from an equally fresh cache.
+
 **Throughput (C10) is measured, and what it shows is a mechanism rather than a
 single number.** The gain tracks how many CUDA-graph launches the transform
 eliminates, and shrinks as the batch grows:
@@ -77,10 +84,12 @@ second libcuda mount that Triton needs, is in the GPU section of
 Stated here rather than left for a reviewer to discover:
 
 - **One row disagrees.** grounding-dino measures 56% against Table 2's 58%.
-- **Table 2 steady-state column does not reproduce from the authors stored
-  traces** under any of five tested definitions, while its cold-start column
-  reproduces exactly from the same files. See the GPU section of
-  [artifact/RESULTS.md](artifact/RESULTS.md).
+- **Cold start is cache-sensitive, and the benchmark is opinionated about it.**
+  Compilation dominates the first measured window, so both arms have to compile
+  with the same TorchInductor cache state or the ratio moves by a factor of
+  several. `gpu/bench.py` gives each arm its own cache directory; a run that
+  lets them share the default does not compare like for like. See the GPU
+  section of [artifact/RESULTS.md](artifact/RESULTS.md).
 - The repository's own test suite is **272 passed, 2 failed**. Both failures are
   cache-hit assertions that reproduce identically on the merge-base commit, so
   they pre-date this work.

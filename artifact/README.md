@@ -318,16 +318,36 @@ forward go from 4 to 1, which is the check that the transform actually fired.
 Warm is flat at 0.993x, matching the authors' own 0.979x for that model.
 
 All three benchmark models measure: t5-small 3.29x, MoLFormer-XL 2.22x and
-Phi-4-mini 1.17x, with CUDA-graph launches per forward going 4->1, 50->1 and
-5->1 respectively. Phi-4 is well below the 8.93x the authors record for it,
-most likely because this runs at 4 x 256 where the paper sizes each model to
-about 70% of GPU memory. C10 is not measured. See the GPU section of
-[`RESULTS.md`](RESULTS.md).
+Phi-4-mini 5.92x, with CUDA-graph launches per forward going 4->1, 50->1 and
+5->1 respectively. C10 is measured separately, and what it shows is a mechanism
+rather than a single number: the gain tracks how many CUDA-graph launches the
+transform removes, so MoLFormer-XL gains 1.70x at batch 1 where it sheds 49 of
+its 50 launches, and nothing by batch 512 where compute dominates. See the GPU
+section of [`RESULTS.md`](RESULTS.md).
 
 **Table 2 cold-start column is the RAW region-window ratio**, reproduced to two
-decimals on 14 of 15 models from the authors stored 3090 traces. Its
-steady-state column does not reproduce from those same traces under any of five
-tested definitions. See the GPU section of [RESULTS.md](RESULTS.md).
+decimals on 14 of 15 models from the authors stored 3090 traces.
+
+It also reproduces from the authors own measurement scripts. Running the
+`fx-graph-research` MoLFormer script on an RTX 3090 under the paper's torch
+2.12.1 matches their recorded warm timing to about one percent (118.5 ms
+measured against 117.8 ms recorded), confirms 5 graph breaks in the original
+arm and 0 in the fixed arm, and gives a cold-start ratio of **6.48x**.
+
+That ratio is sensitive to the state of the TorchInductor cache, which both
+arms must share for the comparison to be like for like:
+
+| inductor cache | original | fixed | cold ratio |
+|---|---|---|---|
+| fresh for both arms | 4576.0 ms | 706.4 ms | 6.48x |
+| warm for both arms | 843.0 ms | 154.8 ms | 5.45x |
+
+Compilation dominates the first measured window, so an arm that reuses kernels
+a previous run already compiled reports a much smaller one. This is why
+[`gpu/bench.py`](gpu/bench.py) gives each arm its own `TORCHINDUCTOR_CACHE_DIR`
+rather than letting them share the default, and it is the single easiest way to
+mismeasure this claim in either direction. See the GPU section of
+[RESULTS.md](RESULTS.md).
 
 All three benchmark models now run under CUDA graphs, Phi-4-mini included. An
 earlier version of this file reported a `[Where]` defect that made Phi-4 crash

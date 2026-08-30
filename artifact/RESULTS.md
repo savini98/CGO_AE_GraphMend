@@ -424,16 +424,47 @@ mis-configured benchmark, because the configuration now reproduces the authors'
 per-iteration times to 1%. A reviewer who matches the paper's setup this
 closely will measure roughly 1.03x, not 1.13x.
 
-Cold start on the same run reaches 5.57x against Table 2's 24.71x, and the
-difference sits entirely in the fixed arm: the authors' fixed cold window is
-250.9 ms, or 2.2x its warm time, where this benchmark measures 714.3 ms, or
-6.2x warm. The original arms are comparable (6200.7 ms against 3976.3 ms). A
-fixed arm that begins its first measured iteration with that much less work
-outstanding is consistent with a warmer compiler cache on that run, which the
-per-arm private inductor cache used here deliberately prevents.
+Cold start on the same run reaches 5.57x. Running the authors' own script
+settles where the rest of the difference comes from.
 
-Identifying the runs behind Table 2's steady-state column, and the cache state
-behind its cold column, is an author task worth doing before camera-ready.
+### Cold start, measured with the authors' own script
+
+`fx-graph-research/models/MoLFormer-XL-both-10pct/molformer_xl_script.py`, run
+on this machine's RTX 3090 under the paper's torch 2.12.1, reproduces the
+recorded environment closely: warm 118.5 ms against the 117.8 ms recorded,
+5 graph breaks in the original arm and 0 in the fixed arm, and peak 0.97 GB at
+the paper's batch size of 837. So the setup is right, and the cold number can
+be read as a property of the measurement rather than of the machine.
+
+The cold-start ratio it reports depends on the state of the TorchInductor
+cache:
+
+| inductor cache | original cold | fixed cold | ratio |
+|---|---|---|---|
+| fresh for both arms | 4576.0 ms | 706.4 ms | **6.48x** |
+| warm for both arms | 843.0 ms | 154.8 ms | **5.45x** |
+| fresh original, warm fixed | 4576.0 ms | 154.8 ms | 29.6x |
+
+Compilation dominates the first measured window, so the cache state is worth
+more to this metric than the transform is. Each row above is internally
+consistent; only the first two compare like for like.
+
+The authors' stored 3090 trace records 6199.9 ms and 250.9 ms. The 250.9 ms is
+2.1x that arm's own warm time, which is close to the "warm cache" row and far
+less work than compiling a fused graph from scratch. Relevant to that,
+`run_molformer_xl.sh` runs the original arm and then the fixed arm without ever
+setting `TORCHINDUCTOR_CACHE_DIR`, so both arms use the default cache and the
+second starts with whatever the first, and any earlier run of the script, left
+in it.
+
+Measured like for like, MoLFormer-XL's cold-start speedup is 5.4x to 6.5x
+depending on which matched cache state is used, consistent with the paper's
+headline of about 5x on average. `artifact/gpu/bench.py` gives each arm a
+private inductor cache directory for exactly this reason, and that is why its
+cold numbers are lower than a run in which the arms share one.
+
+Identifying the runs behind Table 2's steady-state column remains an author
+task worth doing before camera-ready.
 
 ## Withdrawn: the `[Where]` CUDA-graph defect
 
