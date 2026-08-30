@@ -395,27 +395,45 @@ Table 2's metric, alongside a `cold, no compile` figure that subtracts
 and is much smaller; both are printed so neither is hidden. `--paper-batch`
 selects the paper's batch sizes.
 
-**Table 2's steady-state column does not reproduce from those traces.** This
-was tested, not assumed. From the same files that give the exact cold numbers
-above, five candidate definitions were compared against the Table 2 steady
-column, counting matches within 0.03:
+**Reproducing the paper's configuration matters more than the metric.** Three
+settings in the authors' model scripts each drag every ratio toward 1.0 when
+missed, and all three were missed here at first:
 
-| definition | matches |
-|---|---|
-| warm window median | 4 / 15 |
-| warm window mean | 4 / 15 |
-| last warm window | 2 / 15 |
-| GPU busy time in the window | 1 / 15 |
-| sum of kernel times | 1 / 15 |
+| setting | paper | naive default | effect |
+|---|---|---|---|
+| batch size | ~70% of VRAM (837 for MoLFormer) | 8 | large |
+| input shape | real SMILES, `padding=True`, ~37 tokens | 128 | large |
+| TF32 | `allow_tf32 = True`, `matmul_precision("high")` | off | ~2x on Ampere |
 
-Several models come out below 1.0 (t5-small 0.996, blenderbot 0.969,
-flan-t5-large 0.965) where Table 2 reports a suite minimum of 1.05. Since the
-cold column reproduces exactly from these same files, the steady-state column
-is evidently produced by a different measurement, which is not reconstructible
-from what is stored here. **A reviewer recomputing steady state from the traces
-will get roughly 1.0x and may read that as C9 failing.** Identifying the script
-that produced that column is an author task and is worth doing before
-camera-ready.
+With all three matched, this benchmark reproduces the authors' own MoLFormer
+warm timings to within about 1%:
+
+| | authors' 3090 trace | this benchmark |
+|---|---|---|
+| original warm | 117.8 ms | **119.3 ms** |
+| fixed warm | 116.2 ms | **115.5 ms** |
+| peak memory | 0.97 GB | 1.0 GB |
+
+`artifact/gpu/bench.py` now sets TF32 as the paper's scripts do, and
+`--paper-batch` selects the paper's batch sizes.
+
+**On that matched configuration, steady state comes out at 1.033x**, and the
+authors' own traces give 1.014x for the same quantity, against Table 2's 1.13x.
+This is the substantive open item: the disagreement is not an artifact of a
+mis-configured benchmark, because the configuration now reproduces the authors'
+per-iteration times to 1%. A reviewer who matches the paper's setup this
+closely will measure roughly 1.03x, not 1.13x.
+
+Cold start on the same run reaches 5.57x against Table 2's 24.71x, and the
+difference sits entirely in the fixed arm: the authors' fixed cold window is
+250.9 ms, or 2.2x its warm time, where this benchmark measures 714.3 ms, or
+6.2x warm. The original arms are comparable (6200.7 ms against 3976.3 ms). A
+fixed arm that begins its first measured iteration with that much less work
+outstanding is consistent with a warmer compiler cache on that run, which the
+per-arm private inductor cache used here deliberately prevents.
+
+Identifying the runs behind Table 2's steady-state column, and the cache state
+behind its cold column, is an author task worth doing before camera-ready.
 
 ## Withdrawn: the `[Where]` CUDA-graph defect
 

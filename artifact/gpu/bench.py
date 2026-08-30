@@ -23,27 +23,19 @@ which is a correct measurement of the wrong thing.
 STEADY STATE. The median of the remaining region-0/0 intervals, which are
 replays.
 
-STEADY STATE DOES NOT REPRODUCE FROM THE TRACES, and this was tested rather
-than assumed. Over the 15 models with stored 3090 traces, the RAW WINDOW cold
-metric above reproduces Table 2 exactly for 14 of them, to two decimals:
-Florence-2-large 20.95, MoLFormer-XL 24.71, bart-large-cnn 21.07, rebel-large
-19.86, opus-mt-fr-en 13.16, bart-base 11.87, t5-small 3.49, and so on. From the
-SAME trace files, five candidate definitions of steady state were computed and
-compared against Table 2 steady column, matching within 0.03:
+CONFIGURATION MATTERS MORE THAN THE METRIC. Three settings in the paper's model
+scripts each drag every ratio toward 1.0 when missed: the batch size (about 70%
+of VRAM, 837 for MoLFormer, not 8), the input shape (real SMILES padded to about
+37 tokens, not 128), and TF32 (allow_tf32 plus matmul_precision("high"), which
+this file now sets, worth roughly 2x on Ampere). With all three matched, this
+benchmark reproduces the authors' own MoLFormer warm timings to within about 1%:
+119.3 ms against their 117.8 ms original, 115.5 ms against their 116.2 ms fixed,
+at 1.0 GB against their 0.97 GB peak.
 
-    warm window median      4 / 15
-    warm window mean        4 / 15
-    last warm window        2 / 15
-    GPU busy time in window 1 / 15
-    sum of kernel times     1 / 15
-
-Several models come out below 1.0 (t5-small 0.996, blenderbot 0.969,
-flan-t5-large 0.965) where Table 2 reports a minimum of 1.05 across the suite.
-
-So Table 2 cold column is the raw window ratio, and its steady-state column is
-produced by some measurement not reconstructible from these traces. What this
-benchmark prints for warm is the window median: reproducible, stated, and NOT
-the quantity Table 2 reports.
+On that matched configuration steady state comes out at 1.033x, and the authors'
+own traces give 1.014x, against Table 2's 1.13x. That disagreement is the real
+open item, and it is not a mis-configuration artifact: the configuration
+reproduces their per-iteration times to 1%.
 
 Both arms load FULL PRETRAINED checkpoints, because latency depends on real
 layer counts and widths, and both run under `jac run` with their own jac.toml:
@@ -205,6 +197,16 @@ def build(key, device):
 
 def arm():
     import time, torch
+    # The paper's model scripts enable TF32 before doing anything else:
+    #     torch.backends.cuda.matmul.allow_tf32 = True
+    #     torch.set_float32_matmul_precision("high")
+    # On Ampere and later this changes fp32 matmul throughput by a large factor,
+    # so leaving it off measures a much slower model than the paper measured and
+    # drags every ratio toward 1. Inductor warns about it on every run; that
+    # warning is the tell. Matching it here is a configuration match, not a
+    # thumb on the scale: both arms get it, exactly as in the paper's scripts.
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.set_float32_matmul_precision("high")
     if os.environ.get("PAPER_EVAL_DIR"):
         sys.path.insert(0, os.environ["PAPER_EVAL_DIR"])
     key = os.environ["GM_MODEL"]
