@@ -42,17 +42,26 @@ All three rules have real-model demonstrations: `[Defer]` on 17 rows, `[Where]`
 on Phi-4-mini-instruct, Florence-2 and Qwen-Audio-Chat, `[Trap]` on MoLFormer-XL
 and grounding-dino.
 
-**Cold start (C8) reproduces on the three GPU models measured**, using the
-authors' own metric (first iteration minus compilation, excluded from both
-arms): t5-small 3.29x, MoLFormer-XL 2.22x, Phi-4-mini 5.92x, with CUDA-graph
-launches per forward going 4 to 1, 50 to 1, and 5 to 1 respectively.
+**Cold start (C8) reproduces on all three GPU models**, and
+`artifact/gpu/run_reproducible.sh` checks it with fixed expected values and a
+real exit status. Measured from a clean clone of this repository on an RTX 3090:
 
-It also reproduces through a second, independent path: the authors' own
-`fx-graph-research` MoLFormer script, run on an RTX 3090 under the paper's
-torch 2.12.1, matches their recorded warm timing to about one percent (118.5 ms
-against 117.8 ms), confirms 5 graph breaks in the original arm and 0 in the
-fixed arm, and reports a **6.48x** cold-start ratio with both arms compiling
-from an equally fresh cache.
+| model | breaks | launches | cold, compile-subtracted | cold, raw window |
+|---|---|---|---|---|
+| t5-small | 3 -> 0 | 4 -> 1 | 3.68x | 15.06x |
+| MoLFormer-XL | 5 -> 0 | 50 -> 1 | 2.27x | 6.22x |
+| Phi-4-mini | 5 -> 0 | 5 -> 1 | 5.61x | **36.12x** |
+
+The raw-window column is Table 2's own metric, measured with a private
+TorchInductor cache per arm so that both arms compile from equally cold. The
+paper's "up to 26x" sits inside that range.
+
+One Table 2 cell does not reproduce at its stated size: the MoLFormer-XL entry
+of 24.71x. Matched like for like that model gives about 6.2x, confirmed two
+independent ways, by this benchmark (6.22x) and by the authors' own
+`fx-graph-research` script (6.48x), which on the same machine also reproduces
+their recorded warm timing to about one percent (118.5 ms against 117.8 ms) and
+their break counts exactly.
 
 **Throughput (C10) is measured, and what it shows is a mechanism rather than a
 single number.** The gain tracks how many CUDA-graph launches the transform

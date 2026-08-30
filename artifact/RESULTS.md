@@ -449,6 +449,16 @@ Compilation dominates the first measured window, so the cache state is worth
 more to this metric than the transform is. Each row above is internally
 consistent; only the first two compare like for like.
 
+`gpu/bench.py`, which gives each arm a private cache, independently agrees:
+6.22x raw window for the same model. So this is a property of the measurement,
+reproduced by two separate implementations of it.
+
+This does NOT put the paper's headline out of reach. On the same matched-cache
+basis, `run_reproducible.sh` measures a raw window of 15.06x on t5-small and
+**36.12x on Phi-4-mini**, so "up to 26x" is reproducible and exceeded. What
+does not reproduce at its stated size is the single Table 2 cell for
+MoLFormer-XL, 24.71x against about 6.2x here.
+
 The authors' stored 3090 trace records 6199.9 ms and 250.9 ms. The 250.9 ms is
 2.1x that arm's own warm time, which is close to the "warm cache" row and far
 less work than compiling a fused graph from scratch. Relevant to that,

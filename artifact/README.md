@@ -11,8 +11,9 @@ README is the detailed technical companion to this one and should be read
 second.
 
 Badges targeted: Artifacts Available, Artifacts Evaluated Functional, Artifacts
-Evaluated Reusable, Results Validated and Reproduced (for the CPU claims only;
-see [What this artifact does not reproduce](#what-this-artifact-does-not-reproduce)).
+Evaluated Reusable, Results Validated and Reproduced (for the break-elimination
+claims and for C8 cold start; C9 steady state does not reproduce, see
+[What this artifact does not reproduce](#what-this-artifact-does-not-reproduce)).
 
 ## Contents
 
@@ -186,7 +187,7 @@ relative to the repository root.
 | C5 | Table 2 rows that are correctly **not** fixed: longformer 40%, clap 0% | `PYTHONPATH=$PWD python -m paper_eval.run_eval longformer-base-4096 clap-htsat-fused` | `5 -> 3` (40%) and `2 -> 2` (0%). A clean sweep here would be the failure | CPU | ~10 to 25 min cold (est.) |
 | C6 | Break-cause attribution (Table 2's DC / LC / VG / DS / DO / TI column) | `PYTHONPATH=$PWD python -m paper_eval.run_why longformer-base-4096 on` | Per-break reason text and source location, so a surviving break can be checked against the paper's declared out-of-scope category | CPU | ~3 to 10 min per model (est.) |
 | C7 | The 6 network rows (Hub remote code, `trust_remote_code`) | `PYTHONPATH=$PWD python -m paper_eval.run_eval Florence-2 MoLFormer-XL-both10pct chronos-bolt-small Qwen-Audio-Chat stella-en-400M-v5 moe-minicpm-x4-base` | See the network table below. All 6 match Table 2; `stella-en-400M-v5` needs CUDA and xformers and cannot be measured in the CPU image | CPU + network | ~1 to 2 h plus downloads (est.) |
-| C8 | Cold-start forward pass speedup, 5x on average | `bash artifact/gpu/run_reproducible.sh` | PASS per model, with the cold ratio reported two ways (raw region window, which is Table 2's metric, and the same window with compilation subtracted from both arms) and CUDA-graph launches going 4->1, 50->1, 5->1. **Exits non-zero on failure** | NVIDIA GPU | ~30 min, 3 models |
+| C8 | Cold-start forward pass speedup, up to 26x (5x on average) | `bash artifact/gpu/run_reproducible.sh` | PASS per model. Cold reported two ways, raw region window (Table 2's metric) and the same window with compilation subtracted from both arms: t5-small 15.06x / 3.68x, MoLFormer-XL 6.22x / 2.27x, Phi-4-mini 36.12x / 5.61x, with CUDA-graph launches going 4->1, 50->1, 5->1. **Exits non-zero on failure** | NVIDIA GPU | ~30 min, 3 models |
 | C9 | Steady-state forward pass speedup, up to 1.39x | `bash artifact/gpu/run_open_questions.sh` | Warm medians per arm. **Does not reproduce**: measures about 1.03x against Table 2's 1.13x. This script reports and never gates, so it always exits 0 | NVIDIA GPU | ~30 min, 3 models |
 | C10 | Throughput improvement, up to 15% | same | Reproduces only where the mechanism applies: MoLFormer-XL gains about 70% at batch 1 where it sheds 49 of 50 CUDA-graph launches, and nothing at large batch | NVIDIA GPU | included above |
 
@@ -341,8 +342,8 @@ It also reproduces from the authors own measurement scripts. Running the
 measured against 117.8 ms recorded), confirms 5 graph breaks in the original
 arm and 0 in the fixed arm, and gives a cold-start ratio of **6.48x**.
 
-That ratio is sensitive to the state of the TorchInductor cache, which both
-arms must share for the comparison to be like for like:
+That ratio is sensitive to the state of the TorchInductor cache, which has to
+be the SAME for both arms if the comparison is to be like for like:
 
 | inductor cache | original | fixed | cold ratio |
 |---|---|---|---|
@@ -353,7 +354,14 @@ Compilation dominates the first measured window, so an arm that reuses kernels
 a previous run already compiled reports a much smaller one. This is why
 [`gpu/bench.py`](gpu/bench.py) gives each arm its own `TORCHINDUCTOR_CACHE_DIR`
 rather than letting them share the default, and it is the single easiest way to
-mismeasure this claim in either direction. See the GPU section of
+mismeasure this claim in either direction.
+
+None of that puts the paper's headline out of reach. On the same matched-cache
+basis, [`gpu/run_reproducible.sh`](gpu/run_reproducible.sh) measures raw windows
+of 15.06x on t5-small and **36.12x on Phi-4-mini**, so "up to 26x" reproduces
+and is exceeded. The single value that does not reproduce at its stated size is
+Table 2's MoLFormer-XL cell, 24.71x against about 6.2x here, which two
+independent implementations of the measurement agree on. See the GPU section of
 [RESULTS.md](RESULTS.md).
 
 All three benchmark models now run under CUDA graphs, Phi-4-mini included. An
