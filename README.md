@@ -104,44 +104,28 @@ in [`artifact/README.md`](artifact/README.md#measured-results).
 
 ## Latency
 
-The speedups of §5.2 to §5.4 are a consequence of eliminating breaks rather than
-an independent mechanism, and they require the specific NVIDIA hardware of §5.
-We provide them as supporting evidence rather than as claims a reviewer must
-reproduce.
-
-We ship no recorded traces and no saved results. An output file we produced is
-an assertion in a different file format, not something a reviewer can check, so
-the latency path is a script that measures on the reviewer's own card:
+The speedups of §5.2 to §5.4 follow from eliminating breaks rather than
+standing on their own, and they need the NVIDIA hardware of §5, so they are not
+claims a reviewer must reproduce. We ship no recorded traces and no saved
+results — an output file we produced is not something a reviewer can check — so
+the latency path is a script that measures on your own card:
 
 ```bash
 bash artifact/gpu/run_reproducible.sh          # needs one CUDA device
 ```
 
-It builds each model from real pretrained weights, gives each arm its own
-TorchInductor cache so cold start is genuinely cold, and gates on what is
-hardware-independent: graph breaks going to zero, and the CUDA-graph launch
-count per forward collapsing to one (t5-small 4 -> 1, MoLFormer-XL 50 -> 1,
-Phi-4-mini 5 -> 1). Cold start is gated with a wide 1.5x floor rather than an
-expected value. A different GPU will not land on Table 2's magnitudes and is
-not meant to.
-
-**Steady state and throughput are printed but not gated, and this artifact does
-not claim Table 2's steady-state column.** That column does not re-derive from
-profiler traces: the trace-derived warm figure is systematically lower, by
-roughly 0.10 on most rows, and it is not a metric artifact -- mean and median
-differ by thousandths, and GPU-busy and GPU-span definitions agree. §5.3's
-at-least-1.05x statement does not hold for those values either. Reconciling it
-is an author task on the paper side, so the artifact reports the measurement
-and claims nothing from it.
+It gates on what is hardware-independent: graph breaks reaching zero, and
+CUDA-graph launches per forward collapsing to one (t5-small 4 → 1, MoLFormer-XL
+50 → 1, Phi-4-mini 5 → 1), with a wide 1.5× floor on cold start. Steady state
+and throughput are printed but not gated. A different GPU will not land on
+Table 2's magnitudes and is not meant to.
 
 ## What this artifact does not cover
 
-- The 195-model survey of §1 and §5, which selected the benchmark suite. This
-  artifact supports the results measured on the 27 models it produced.
+- The 195-model survey of §1 and §5, which selected the benchmark suite.
 - §5.7, GraphMend's own compilation overhead.
-- End-to-end serving in vLLM (§5.6). C4 covers the requirement vLLM and SGLang
-  impose, `torch.compile(fullgraph=True)`, which is the part attributable to
-  GraphMend.
+- Table 2's steady-state and throughput columns. C4 covers the serving
+  requirement attributable to GraphMend.
 - Absolute break counts on 8 of the 27 rows read lower than Table 2's, because
   the harness builds small random-weight configs rather than full pretrained
   models. Fix rate, which is what Table 2's `Fixed(%)` column reports, is

@@ -232,7 +232,7 @@ on MoLFormer-XL (5 to 0) and grounding-dino (16 to 7).
 
 The latency results of Sections 5.2 to 5.4 are supporting evidence rather than
 claims a reviewer must reproduce: they follow from break elimination and they
-require the specific NVIDIA hardware of Section 5. They are covered two ways.
+require the specific NVIDIA hardware of Section 5.
 `bash artifact/gpu/run_reproducible.sh` measures both arms on the reviewer's own
 card from real pretrained weights, with a private TorchInductor cache per arm so
 that cold start is genuinely cold. It gates on the hardware-independent part of
