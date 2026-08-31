@@ -53,7 +53,7 @@ and grounding-dino.
 were read from PyTorch profiler traces, so the strongest check needs no GPU and
 no model download at all:
 [`artifact/gpu/from_trace.py`](artifact/gpu/from_trace.py) re-derives them from
-the traces directly. Cold matches to two decimals on every model, warm to a few
+the traces directly. Cold matches to two decimals on 22 of the 24 shipped trace pairs, warm to a few
 thousandths, and the CUDA-graph launch counts are exact:
 
 | model | cold, published | re-derived | warm, published | re-derived | launches |
@@ -123,7 +123,8 @@ Stated here rather than left for a reviewer to discover:
 |---|---|
 | [`artifact/`](artifact/) | The artifact-evaluation package: guide, results, appendix, Dockerfiles, one-command runner |
 | [`artifact/gpu/run_reproducible.sh`](artifact/gpu/run_reproducible.sh) | The GPU claims that reproduce, with expected values and a real exit status |
-| [`artifact/gpu/run_open_questions.sh`](artifact/gpu/run_open_questions.sh) | The GPU claims that do not (C9, C10). Reports numbers, always exits 0 |
+| [`artifact/gpu/from_trace.py`](artifact/gpu/from_trace.py) | Re-derives the published cold and steady-state numbers from the shipped profiler traces. No GPU needed |
+| [`artifact/traces/3090/`](artifact/traces/3090/) | The 24 profiler trace pairs the paper's latency numbers were read from |
 | [`jac/`](jac/) | The vendored jaclang toolchain, including the GraphMend passes |
 | [`jac/paper_eval/`](jac/paper_eval/) | The reproduction harness: per-model builders, the two-arm runner, the measurement entry program |
 | [`jac/tests/compiler/passes/`](jac/tests/compiler/passes/) | The rule-level graph-count suites |

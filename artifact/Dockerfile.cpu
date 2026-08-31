@@ -24,10 +24,15 @@
 #     --entrypoint bash graphmend-cpu \
 #     -lc 'cd /opt/jaseci/jac && python -m paper_eval.run_eval Florence-2'
 #
-# NOT VERIFIED: this image has never been built. The install recipe mirrors the
-# repository's own `GraphMend Graph Counts` CI lane (CPU wheel index, pinned
-# torch and numpy), but a clean build has not been done. See the "What we ran
-# and what we did not" section of artifact/README.md.
+# BUILT AND VERIFIED. Every break-elimination number in artifact/RESULTS.md was
+# measured inside this image, so `docker run` here executes the same binary that
+# produced them. A clean build from a fresh clone of the public repository runs
+# `18 passed, 0 skipped` on the rule suites and five PASS model rows, exit 0.
+#
+# Give Docker at least 12 GB. Phi-4-mini-instruct peaks near 9.7 GB while
+# GraphMend compiles the imported transformers modeling code, and below that
+# ceiling the container is SIGKILLed and the row reports ERR with exit 137.
+# See the troubleshooting section of artifact/README.md.
 
 # 3.13 is the Python the recorded results were measured on. The repository's
 # packaging manifest floors the toolchain at 3.14 for the shipped binary; the

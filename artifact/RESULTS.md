@@ -508,7 +508,8 @@ Run against the authors' 3090 traces it reproduces the published table:
 | blenderbot-400M | 3.2x | **3.21x** | 1.00x | 0.969x | 4 -> 1 |
 | biogpt | 1.6x | **1.63x** | 1.01x | 1.004x | 3 -> 1 |
 
-Cold matches to two decimals on every row, warm to within a few thousandths,
+Cold matches to two decimals on 22 of the 24 pairs, warm to within a few
+thousandths,
 and the launch counts are exact. This is the strongest form the latency claims
 take in this artifact: a reviewer needs neither a GPU nor a model download.
 

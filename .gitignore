@@ -12,3 +12,6 @@ jac/jaclang/vendor/typeshed/stdlib
 # Reviewer scratch
 hf-cache/
 *.log
+
+# Jac compiler cache (machine-generated build artifacts)
+.jac/

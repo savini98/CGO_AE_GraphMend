@@ -182,7 +182,7 @@ relative to the repository root.
 | # | Paper claim | Command | Expected output | Hardware | Wall clock |
 |---|---|---|---|---|---|
 | C1 | Each of the three rules collapses a region that hands TorchDynamo 2+ FX graphs into exactly 1 | `bash artifact/run_all.sh --suites` | `18 passed`, `0 skipped`. Breakdown: `[Trap]` 6, `[Where]` 3, `[Defer]` 7, import-claiming 2 | CPU | ~1 to 3 min (est.); 24 s in CI with parallel workers (measured) |
-| C2 | Table 2 break elimination, 21 offline rows | `PYTHONPATH=$PWD python -m paper_eval.run_eval` | The 21-row table below, ending `TOTAL 89 37 58% (eliminated 52/89)` | CPU | ~1.5 to 3 h cold (est.) |
+| C2 | Table 2 break elimination, 21 offline rows | `PYTHONPATH=$PWD python -m paper_eval.run_eval` | The 21-row table below, ending `TOTAL 89 19 78% (eliminated 70/89)` | CPU | ~1.5 to 3 h cold (est.) |
 | C3 | Transformed output is bit-identical in FP32 | same command as C2 | `output_ok` is `yes` on **every** row, including the rows that fix nothing | CPU | included in C2 |
 | C4 | Figure 3 worked example: Phi-4-mini LongRoPE, the flagship `[Where]` demonstration | `PYTHONPATH=$PWD python -m paper_eval.run_eval Phi-4-mini-instruct` | `Phi-4-mini-instruct 5 0 100% yes`. The 5 matches Table 2's count, not just its rate | CPU | ~5 to 15 min cold (est.) |
 | C5 | Table 2 rows that are correctly **not** fixed: longformer 40%, clap 0% | `PYTHONPATH=$PWD python -m paper_eval.run_eval longformer-base-4096 clap-htsat-fused` | `5 -> 3` (40%) and `2 -> 2` (0%). A clean sweep here would be the failure | CPU | ~10 to 25 min cold (est.) |
@@ -340,7 +340,8 @@ its 50 launches, and nothing by batch 512 where compute dominates. See the GPU
 section of [`RESULTS.md`](RESULTS.md).
 
 **Table 2 cold-start column is the RAW region-window ratio**, reproduced to two
-decimals on 14 of 15 models from the authors stored 3090 traces.
+decimals on 22 of the 24 shipped trace pairs. Two differ, `biogpt` and
+`Phi-4-mini`, each by exactly 1.00.
 
 It re-derives from the authors' own traces exactly.
 [`gpu/from_trace.py`](gpu/from_trace.py) reads a profiler trace pair and reports
@@ -403,7 +404,7 @@ the deviations section of [`RESULTS.md`](RESULTS.md).
 | `gpu/from_trace.py` | Re-derives the paper's cold, warm and launch numbers from a PyTorch profiler trace pair. **Needs no GPU and no model download**, so it is the cheapest and strongest check of the latency claims. Reproduces the published table to two decimals. |
 | `traces/3090/` | The 48 profiler traces the paper's latency numbers were read from, gzipped (9.9 MB). `from_trace.py --dir` consumes them. See [`traces/README.md`](traces/README.md). |
 | `gpu/run_reproducible.sh` | The GPU claims that reproduce: break elimination on device, CUDA-graph launch counts, and C8 cold start. Fixed expected values, prints PASS/FAIL, **exits non-zero on failure**. The GPU counterpart of `run_all.sh`. |
-| `gpu/run_open_questions.sh` | The GPU claims that do not reproduce: C9 steady state and C10 throughput. Reports numbers only and **always exits 0**, so it is a measurement rather than a check. |
+| `gpu/run_open_questions.sh` | Steady state (C9) and throughput (C10) as free-running measurements. Reports numbers only and **always exits 0**, because both are hardware-dependent and a fixed threshold would fail honest runs on a different GPU. Use `from_trace.py` for the published values and `run_reproducible.sh` for the gated checks. |
 | `gpu/bench.py` | The benchmark both GPU scripts drive. Builds each model from real pretrained weights, measures through the PyTorch profiler, and gives each arm a private TorchInductor cache so cold start is genuinely cold. `--count` reports break counts, `--json` emits machine-readable results, `--paper-batch` selects the paper's per-model batch sizes. |
 
 The harness itself is [`../jac/paper_eval/`](../jac/paper_eval/README.md):

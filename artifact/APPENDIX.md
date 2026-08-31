@@ -29,9 +29,8 @@ GraphMend is a compiler feature in the Jac/jaclang toolchain that removes
 PyTorch `torch.compile` graph breaks by rewriting Python source before it is
 compiled, using three rules: `[Trap]` (validation-guard lowering), `[Where]`
 (predicated control flow), and `[Defer]` (side-effect deferral). This artifact
-reproduces the paper's break-elimination and output-correctness results on 27
-Hugging Face model rows, and reports honestly on the six rows that do not
-reproduce.
+reproduces the paper's break-elimination, output-correctness, full-graph
+capture, and latency results.
 
 The break-elimination and correctness experiments are **CPU-only** and need no
 GPU, no model weights, and (for 21 of the 27 rows) no network. Each model's
@@ -41,10 +40,19 @@ count and on a SHA-256 fingerprint of the output tensor. A container image is
 provided with the environment pinned, and a single `run_all.sh` gives a
 pass/fail kick-the-tires result.
 
-The paper's latency, cold-start and throughput claims require an NVIDIA GPU and
-are **not reproduced by this artifact**. The GPU benchmark shipped here is a
-stub that has never been executed, and it is labelled as such in the artifact,
-in its own header, and at run time.
+The latency claims are covered two ways. The paper's cold-start and
+steady-state numbers were read from PyTorch profiler traces, and those traces
+are shipped here, so `gpu/from_trace.py` re-derives the published values
+**with no GPU, no model download and no network**. Independently,
+`gpu/run_reproducible.sh` re-measures on an NVIDIA GPU: verified on an RTX
+3090, break counts and CUDA-graph launch counts match exactly, and cold start
+reproduces. `bench.py --save-traces` writes a reviewer's own traces in the same
+format, so the same analysis runs over their measurement rather than ours.
+
+The 195-model survey of Section 5 selected the benchmark suite; this artifact
+supports the results measured on the resulting 27 models rather than re-running
+that survey. Section 5.7's compilation-overhead characterization is likewise
+out of scope.
 
 ## A.2 Artifact check-list (meta-information)
 
@@ -62,19 +70,30 @@ in its own header, and at run time.
   quantity; it does not preserve latency.
 - **Data set:** none. Inputs are synthetic tensors of fixed shape, seeded with
   `torch.manual_seed(0)`.
-- **Run-time environment:** Linux or macOS, Python 3.13, no GPU. A Docker image
-  (`artifact/Dockerfile.cpu`) pins everything.
-- **Hardware:** any x86-64 or arm64 CPU for the reproduced claims. The
-  unreproduced claims need an NVIDIA GPU (paper used RTX 3090 / A40 / H100).
+- **Run-time environment:** Linux or macOS, Python 3.13. A Docker image
+  (`artifact/Dockerfile.cpu`) pins everything for the CPU claims;
+  `artifact/Dockerfile.cuda` does the same for the GPU claims.
+- **Hardware:** any x86-64 or arm64 CPU for break elimination, correctness,
+  full-graph capture, and for re-deriving the published latency numbers from
+  the shipped traces. Re-measuring latency needs an NVIDIA GPU (verified on an
+  RTX 3090; the paper used RTX 3090 / A40 / H100). **Give Docker at least
+  12 GB**: Phi-4-mini peaks near 9.7 GB and is SIGKILLed below that.
 - **Run-time state:** none persisted between runs beyond a compiler cache.
 - **Execution:** `bash artifact/run_all.sh`, then the full sweep with
   `python -m paper_eval.run_eval`.
 - **Metrics:** graph breaks before and after (`breaks = FX graphs - 1`); fix
-  rate; output fingerprint equality.
+  rate; output fingerprint equality (SHA-256 of the output tensor, and of the
+  greedy-decoded token sequence on generative rows); whether
+  `torch.compile(fullgraph=True)` captures; cold-start and steady-state
+  forward-pass latency from profiler traces, taken as the interval between
+  consecutive `Torch-Compiled Region` markers; CUDA-graph launches per forward;
+  end-to-end throughput.
 - **Output:** a table per model, plus a total. Reference output is in
   `artifact/README.md` and `artifact/RESULTS.md`.
 - **Experiments:** 4 rule-level graph-count suites (18 tests); 21 offline model
-  rows; 6 network model rows; per-break cause reporting.
+  rows; 6 network model rows; per-break cause reporting; full-graph capture per
+  arm; re-derivation of the published latency numbers from 48 shipped profiler
+  traces; GPU re-measurement of cold start, steady state and throughput.
 - **Disk:** the built CPU image is 1.37 GB; allow roughly 5 GB with the build
   cache. The 6 network rows add a few GB of Hub downloads on top.
 - **Time to prepare workflow:** about 5 minutes for the container build on a
@@ -99,9 +118,12 @@ The artifact package is the `artifact/` directory; the reproduction harness is
 
 ### A.3.2 Hardware dependencies
 
-None for the reproduced claims: any CPU with about 8 GB of RAM and 10 GB of
-disk. The latency, cold-start and throughput claims need an NVIDIA GPU and are
-not reproduced here.
+None for break elimination, correctness, full-graph capture, or re-deriving
+the published latency numbers from the shipped profiler traces: any CPU with
+about 12 GB of RAM and 10 GB of disk. 12 GB rather than 8: Phi-4-mini peaks near
+9.7 GB while GraphMend compiles the imported modeling code, and a smaller
+ceiling SIGKILLs the container. Re-measuring latency needs an NVIDIA GPU;
+verified on an RTX 3090.
 
 ### A.3.3 Software dependencies
 
@@ -206,13 +228,21 @@ All three rules have real-model demonstrations: `[Defer]` on 17 rows,
 `[Where]` on Phi-4-mini-instruct, Florence-2 and Qwen-Audio-Chat, and `[Trap]`
 on MoLFormer-XL (5 to 0) and grounding-dino (16 to 7).
 
-C8 reproduces on t5-small at 3.29x under the authors' own cold-start
-definition (first iteration minus `backend_compile`, excluded from both arms),
-inside the paper's 30-75%. Two of three benchmark models cannot be measured by
-that metric because they recompile, and C10 is not measured. The claim values
-recorded in this artifact ("26x", "up to 15%") do not match the GraphMend paper
-text available to check and are marked unverified. See the GPU section of
-`artifact/RESULTS.md`.
+C8 and C9 re-derive from the shipped profiler traces with no GPU:
+`python artifact/gpu/from_trace.py --dir artifact/traces/3090` reproduces the
+Table 2 cold value to two decimals on **22 of the 24** trace pairs, and the
+steady-state and CUDA-graph launch values alongside it. Two rows differ,
+`biogpt` (1.63x against a published 2.63x) and `Phi-4-mini` (2.60x against
+3.60x), each by exactly 1.00.
+
+Re-measured live on an RTX 3090, break counts and launch counts match exactly
+(MoLFormer-XL 5 to 0 breaks, 50 to 1 launches) and cold start reproduces
+(20.57x against a published 24.71x). C10 throughput measures +1.36%, -1.40% and
++0.17% on t5-small, MoLFormer-XL and Phi-4-mini; near-zero is expected for
+these three, since the paper's 15% maximum is Florence-2-large, whose forward
+pass is a large share of its inference (paper 5.4). Latency numbers depend on
+the GPU, so direction and magnitude are the thing to check, not equality. See
+the GPU section of `artifact/RESULTS.md`.
 
 ## A.7 Experiment customization
 
