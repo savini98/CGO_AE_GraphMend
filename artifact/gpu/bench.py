@@ -146,6 +146,51 @@ def _bs(default_b, default_s):
             int(os.environ.get("GM_BENCH10_SEQ", default_s)))
 
 
+def _auto_batch(model, inputs, torch, target=0.70):
+    """Port of find_max_batch_size() from the reference repo's gpu_utils.py.
+
+    Probes one forward pass at the built-in batch, converts that into a
+    per-sample memory cost, inflates it by the same size-tiered generation
+    multiplier the reference uses (a single forward with one decoder token
+    badly underestimates KV-cache growth), and fills `target` of VRAM.
+
+    Returns None when it cannot measure, in which case the caller keeps the
+    built-in batch rather than guessing.
+    """
+    import gc
+    try:
+        total = torch.cuda.get_device_properties(0).total_memory
+        torch.cuda.empty_cache()
+        gc.collect()
+        torch.cuda.reset_peak_memory_stats()
+        baseline = torch.cuda.memory_allocated(0)
+        probe_b = int(next(iter(inputs.values())).shape[0])
+        with torch.inference_mode():
+            model(**inputs)
+            torch.cuda.synchronize()
+        peak = torch.cuda.max_memory_allocated(0)
+        torch.cuda.empty_cache()
+        gc.collect()
+
+        per_sample = max((peak - baseline) / max(probe_b, 1), 1024)
+        model_gb = baseline / (1024 ** 3)
+        mult = (80.0 if model_gb > 3.0 else
+                40.0 if model_gb > 1.0 else
+                30.0 if model_gb > 0.3 else 10.0)
+        available = (total * target) - baseline
+        if available <= 0:
+            return None
+        bs = int(available / (per_sample * mult))
+        bs = max(1, min(bs, 2048))
+        print(f"# auto-batch: model {model_gb:.2f} GB, per-sample "
+              f"{per_sample / 1024:.1f} KB, multiplier {mult:.0f}x, "
+              f"target {target:.0%} of {total / 1024 ** 3:.1f} GB -> batch {bs}")
+        return bs
+    except Exception as exc:                      # noqa: BLE001
+        print(f"# auto-batch failed ({type(exc).__name__}), keeping default")
+        return None
+
+
 def build(key, device):
     import torch
     if key == "t5-small":
@@ -219,6 +264,23 @@ def arm():
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     torch.manual_seed(0)
     model, inputs = build(key, dev)
+
+    # Paper batch sizing: "Batch sizes target about 70% of GPU memory per
+    # model; original and fixed models use identical batch sizes and inputs."
+    # This is a port of find_max_batch_size() from the reference repo's
+    # gpu_utils.py, so the batch is chosen by the paper's RULE rather than
+    # copied from the paper's MACHINE. On a 24 GB card that yields a smaller
+    # batch than the 80 GB host the reference traces came from, which is the
+    # point: the rule is what transfers across GPUs, the number is not.
+    if (dev == "cuda" and os.environ.get("GM_BENCH10_AUTO_BATCH")
+            and not os.environ.get("GM_BENCH10_BATCH")):
+        bs = _auto_batch(model, inputs, torch)
+        if bs and bs > 1:
+            os.environ["GM_BENCH10_BATCH"] = str(bs)
+            del model, inputs
+            torch.cuda.empty_cache()
+            torch.manual_seed(0)
+            model, inputs = build(key, dev)
 
     def sync():
         if dev == "cuda":
@@ -441,9 +503,19 @@ def run(key, on, count):
             env["GM_BENCH10_COUNT"] = "1"
         p = subprocess.run([sys.executable, "-m", "jaclang", "run", "bench10.py"],
                            capture_output=True, text=True, env=env, cwd=wd)
+        auto_b = None
+        for ln in p.stdout.splitlines():
+            if ln.startswith("# auto-batch:") and "-> batch " in ln:
+                try:
+                    auto_b = int(ln.rsplit("-> batch ", 1)[1].strip())
+                except ValueError:
+                    pass
         for ln in reversed(p.stdout.strip().splitlines()):
             if ln.startswith("GMBENCH10 "):
-                return json.loads(ln[len("GMBENCH10 "):])
+                res = json.loads(ln[len("GMBENCH10 "):])
+                if auto_b:
+                    res["auto_batch"] = auto_b
+                return res
         # Keep the exception line, not just the tail. A traceback's most useful
         # line is its last "SomeError: message", and slicing the last 500
         # characters drops exactly that whenever the frames below it are deep,
@@ -485,6 +557,12 @@ def main():
     ap.add_argument("--runs", type=int, default=None,
                     help="forward passes to profile (default 8). The paper "
                          "profiles seven, giving six inter-marker intervals.")
+    ap.add_argument("--auto-batch", action="store_true",
+                    help="size the batch by the paper's RULE rather than its "
+                         "numbers: probe one forward, then fill about 70%% of "
+                         "VRAM, as gpu_utils.find_max_batch_size does. Both "
+                         "arms get the same batch. Prefer this over "
+                         "--paper-batch on a GPU that is not a 24 GB 3090.")
     o = ap.parse_args()
     if getattr(o, "paper_batch", False):
         os.environ["GM_BENCH10_PAPER_BATCH"] = "1"
@@ -497,7 +575,19 @@ def main():
         os.environ.setdefault("GM_BENCH10_STAMP", _stamp_now())
     collected = {}
     for key in o.models:
-        off, on = run(key, False, o.count), run(key, True, o.count)
+        if o.auto_batch:
+            os.environ["GM_BENCH10_AUTO_BATCH"] = "1"
+            os.environ.pop("GM_BENCH10_BATCH", None)
+        off = run(key, False, o.count)
+        # Pin the ON arm to whatever the OFF arm sized to. The paper requires
+        # "original and fixed models use identical batch sizes and inputs",
+        # and letting each arm auto-detect is exactly how the reference runs
+        # ended up comparing 1252 samples against 1332.
+        if o.auto_batch and isinstance(off, dict) and off.get("auto_batch"):
+            os.environ["GM_BENCH10_BATCH"] = str(off["auto_batch"])
+        on = run(key, True, o.count)
+        if o.auto_batch:
+            os.environ.pop("GM_BENCH10_BATCH", None)
         if o.json:
             collected[key] = {"off": off, "on": on}
             continue
