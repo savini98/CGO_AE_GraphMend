@@ -56,6 +56,12 @@ GM_BENCH10_MODE=default for those, and note that the numbers are then not the
 paper's CUDA-graph setup.
 """
 import argparse, json, os, shutil, statistics, subprocess, sys, tempfile
+from datetime import datetime
+
+
+def _stamp_now():
+    """Timestamp for saved trace filenames, matching the reference naming."""
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 ARM = "GM_BENCH10_ARM"
 
@@ -298,6 +304,20 @@ def arm():
         prof.export_chrome_trace(tf)
         with open(tf) as fh:
             evs = _json.load(fh).get("traceEvents", [])
+        # Keep the trace when asked, under the same naming the reference
+        # scripts use, so `from_trace.py` consumes a reviewer's own trace and
+        # the shipped reference traces identically. GraphMend off is the
+        # "original" arm and GraphMend on is the "fixed" arm.
+        _tdir = os.environ.get("GM_BENCH10_TRACE_DIR")
+        if _tdir:
+            os.makedirs(_tdir, exist_ok=True)
+            _armname = "fixed" if os.environ.get("GM_BENCH10_ON") else "original"
+            _stamp = os.environ.get("GM_BENCH10_STAMP", "run")
+            _dest = os.path.join(
+                _tdir, f"{os.environ.get('GM_MODEL', 'model')}"
+                       f"_trace_{_armname}_{_stamp}.json")
+            shutil.copyfile(tf, _dest)
+            print(f"# trace written: {_dest}")
         os.unlink(tf)
 
         # Iteration boundaries. Region 0/N is the FIRST subgraph of an
@@ -408,6 +428,13 @@ def run(key, on, count):
         env = dict(os.environ, PYTHONPATH=repo, PAPER_EVAL_DIR=repo,
                    GM_MODEL=key, TORCHINDUCTOR_CACHE_DIR=icache,
                    TRITON_CACHE_DIR=tcache, **{ARM: "1"})
+        # The arm learns which side it is from the environment rather than from
+        # the jac.toml it is about to compile, so a saved trace can be named
+        # original/fixed the way the reference traces are.
+        if on:
+            env["GM_BENCH10_ON"] = "1"
+        else:
+            env.pop("GM_BENCH10_ON", None)
         if os.environ.get("GM_BENCH10_PAPER_BATCH") and key in PAPER_BATCH_3090:
             env["GM_BENCH10_BATCH"] = str(PAPER_BATCH_3090[key])
         if count:
@@ -448,9 +475,26 @@ def main():
                     help="emit the paired off/on results as one JSON object "
                          "instead of the human-readable report. The two "
                          "checked runners beside this file consume it.")
+    ap.add_argument("--save-traces", metavar="DIR",
+                    help="keep each arm's PyTorch profiler trace under DIR, "
+                         "named <model>_trace_<original|fixed>_<stamp>.json, "
+                         "the same convention as the reference traces in "
+                         "artifact/traces/. Feed them to from_trace.py to "
+                         "re-derive cold and steady-state the way the paper "
+                         "does, from your own run rather than from ours.")
+    ap.add_argument("--runs", type=int, default=None,
+                    help="forward passes to profile (default 8). The paper "
+                         "profiles seven, giving six inter-marker intervals.")
     o = ap.parse_args()
     if getattr(o, "paper_batch", False):
         os.environ["GM_BENCH10_PAPER_BATCH"] = "1"
+    if o.runs:
+        os.environ["GM_BENCH10_RUNS"] = str(o.runs)
+    if o.save_traces:
+        os.environ["GM_BENCH10_TRACE_DIR"] = os.path.abspath(o.save_traces)
+        # One stamp for the whole invocation, so an original/fixed pair shares
+        # it and from_trace.py --dir pairs them unambiguously.
+        os.environ.setdefault("GM_BENCH10_STAMP", _stamp_now())
     collected = {}
     for key in o.models:
         off, on = run(key, False, o.count), run(key, True, o.count)

@@ -12,11 +12,34 @@ That needs **no GPU, no model download and no network**. It prints cold, warm
 and CUDA-graph launch counts per model, and reproduces the published table to
 two decimals on cold, to a few thousandths on warm, and exactly on launches.
 
-Re-running the benchmark on your own GPU
-([`../gpu/run_reproducible.sh`](../gpu/run_reproducible.sh)) is the other,
-weaker check: it confirms the mechanism (breaks eliminated, launches
+## Producing your own traces
+
+You do not have to take these files on trust. `gpu/bench.py` writes traces in
+the same format and naming, from **GraphMend itself** rather than from a
+hand-patched model, so the same analysis runs over your own measurement:
+
+```bash
+cd jac
+PYTHONPATH=$PWD python ../artifact/gpu/bench.py \
+    --save-traces /tmp/mytraces --runs 7 t5-small MoLFormer-XL-both10pct
+python ../artifact/gpu/from_trace.py --dir /tmp/mytraces
+```
+
+`--runs 7` matches the seven forward passes the reference traces contain. The
+GraphMend-off arm is written as `original` and the GraphMend-on arm as `fixed`,
+so `from_trace.py --dir` pairs them exactly as it pairs the shipped traces.
+That is the full loop: generate, analyse, compare against `3090/`.
+
+Note that this measures GraphMend's own transformation, whereas the reference
+traces measure hand-written fixed model files. Agreement between the two is the
+interesting result, since it is what shows the compiler reproduces the manual
+fix.
+
+Re-running the checked benchmark
+([`../gpu/run_reproducible.sh`](../gpu/run_reproducible.sh)) is a third,
+coarser check: it confirms the mechanism (breaks eliminated, launches
 consolidated, a large cold-start saving) but will not land on the same numbers,
-because they depend on the card.
+because they depend on the GPU.
 
 ## What is here
 
@@ -48,6 +71,23 @@ The reference scripts write **two** profiles per arm and they disagree by about
 On MoLFormer-XL the printed number gives 5.36x where the published trace gives
 20.57x on the same run. Reading the wrong one is the easiest way to conclude
 the latency claims do not reproduce when they do.
+
+## Iteration 2 is often still warming up
+
+Steady state is sensitive to how it is averaged, and the reference metric is a
+**mean** over the warm iterations. Window 2 frequently still contains
+CUDA-graph capture, and with only five or six warm iterations a mean is not
+robust to it. From a t5-small run:
+
+```
+original windows: 7659.9  32.0  7.0  6.9  6.9  6.9   mean 11.95, median 6.94
+fixed    windows:  493.3  27.7  7.2  7.0  7.0  7.0   mean 11.19, median 7.05
+                          ^^^^ still warming
+```
+
+Mean gives 1.068x, median gives 0.985x. The choice changes the sign of the
+result, so `from_trace.py` prints both and flags the window when it is an
+outlier. Cold start is unaffected, since it reads window 1 only.
 
 ## Naming
 
