@@ -115,7 +115,12 @@ with torch.no_grad():
         # Some models carry their breaks on the generation path rather than in a
         # bare forward: Florence-2's guards are shape comparisons Dynamo folds at
         # trace time, so a forward-only row reports 0 breaks and measures nothing.
-        out = compiled.generate(**inputs, max_new_tokens=4, do_sample=False,
+        # Paper 5.1 claims "greedy-decoded token sequences are identical for
+        # every generative model", so the comparison below is over a decoded
+        # SEQUENCE rather than a single step. 16 tokens rather than 4: a
+        # divergence introduced by a transform usually appears a few steps in,
+        # once the sampled prefix differs, and a 4-token window can miss it.
+        out = compiled.generate(**inputs, max_new_tokens=16, do_sample=False,
                                 num_beams=1)
     else:
         out = compiled(**inputs)
@@ -140,7 +145,13 @@ for v in inputs.values():
         in_shape = list(v.shape)
         break
 
+# Which quantity `out_hash` covers, so RESULTS.md can say how many rows
+# compare decoded token sequences rather than asserting it. For a generate row
+# the returned tensor IS the token ids, so the hash is over the sequence.
+compared = "tokens" if spec.get("call") == "generate" else "logits"
+
 print("GMRESULT " + json.dumps({
     "key": key, "graphs": len(graphs), "breaks": max(0, len(graphs) - 1),
-    "out_hash": out_hash, "in_shape": in_shape, "error": None,
+    "out_hash": out_hash, "in_shape": in_shape, "compared": compared,
+    "error": None,
 }))
