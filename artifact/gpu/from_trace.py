@@ -37,6 +37,7 @@ to conclude a claim does not reproduce when it does. This script prints the
 whole window sequence so the choice stays visible.
 """
 import argparse
+import gzip
 import json
 import os
 import statistics
@@ -46,7 +47,14 @@ MARKER_PREFIX = "Torch-Compiled Region:"
 
 
 def _events(path):
-    with open(path) as fh:
+    """Trace events from a chrome trace, gzipped or not.
+
+    The shipped traces are gzipped: they are hugely repetitive JSON, so the
+    3090 set is 244 MB raw and 9.9 MB compressed, which is the difference
+    between shipping them and not.
+    """
+    opener = gzip.open if path.endswith(".gz") else open
+    with opener(path, "rt") as fh:
         return json.load(fh).get("traceEvents", [])
 
 
@@ -104,7 +112,7 @@ def summarize(path, label):
     launches, kernels = counts(path)
     print(f"  {label:9s} {os.path.basename(path)}")
     print(f"     region {region}, {len(ws)} windows")
-    print(f"     windows ms: " + " ".join(f"{w:.1f}" for w in ws[:8]))
+    print("     windows ms: " + " ".join(f"{w:.1f}" for w in ws[:8]))
     print(f"     cold {cold:9.1f} ms   warm {warm:8.3f} ms   "
           f"launches {launches}   kernels {kernels}")
     return {"cold": cold, "warm": warm, "launches": launches}
@@ -134,7 +142,7 @@ def main():
 
     if o.dir:
         files = [os.path.join(o.dir, f) for f in sorted(os.listdir(o.dir))
-                 if f.endswith(".json")]
+                 if f.endswith(".json") or f.endswith(".json.gz")]
         origs = [f for f in files if "_original_" in os.path.basename(f)]
         fixes = [f for f in files if "_fixed_" in os.path.basename(f)]
         if not origs or not fixes:
