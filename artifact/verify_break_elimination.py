@@ -1,8 +1,8 @@
 """Does GraphMend eliminate graph breaks without changing the output?
 
-    python artifact/table2_breaks.py             # every model
-    python artifact/table2_breaks.py t5-small    # a subset, for a quick check
-    python artifact/table2_breaks.py --offline   # skip rows needing downloads
+    python artifact/verify_break_elimination.py             # every model
+    python artifact/verify_break_elimination.py t5-small    # a subset, for a quick check
+    python artifact/verify_break_elimination.py --offline   # skip rows needing downloads
 
 Runs every model twice, GraphMend off then on, and reports what the transform
 removed and whether the result survived it. Exit status is non-zero if any row

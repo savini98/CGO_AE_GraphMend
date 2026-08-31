@@ -410,6 +410,7 @@ the deviations section of [`RESULTS.md`](RESULTS.md).
 | `jac.toml` | Project config that enables `graphmend_claim_imports`, so hand-typed commands in this directory behave like the harness. |
 | `minimal_example.py` | Smallest correct own-script template. Demonstrates both gotchas. Run it with `jac run`, never with `python`. |
 | `../jac/paper_eval/run_fullgraph.py` | C11, paper 5.6: attempts `torch.compile(fullgraph=True)` per arm. Expects off to FAIL and on to succeed, so a both-pass result is a failure rather than a win. CPU only, deterministic. |
+| `verify_break_elimination.py` | **The single command for the break-elimination claim.** Runs every model twice, GraphMend off then on, and reports breaks found, breaks eliminated, and whether the output is bit-identical. Exits non-zero if any row errors or changes its output. |
 | `gpu/from_trace.py` | Re-derives the paper's cold, warm and launch numbers from a PyTorch profiler trace pair. **Needs no GPU and no model download**, so it is the cheapest and strongest check of the latency claims. Reproduces the published table to two decimals. |
 | `traces/3090/` | The 48 profiler traces the paper's latency numbers were read from, gzipped (9.9 MB). `from_trace.py --dir` consumes them. See [`traces/README.md`](traces/README.md). |
 | `gpu/run_reproducible.sh` | The GPU claims that reproduce: break elimination on device, CUDA-graph launch counts, and C8 cold start. Fixed expected values, prints PASS/FAIL, **exits non-zero on failure**. The GPU counterpart of `run_all.sh`. |

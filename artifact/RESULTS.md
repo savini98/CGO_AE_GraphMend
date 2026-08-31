@@ -142,7 +142,7 @@ this harness builds a small config, so the absolute counts differ and the
 percentage moves with them. `[Trap]` fires as expected on both sizes.
 
 **Every row that the reference measures reproduces Table 2's break count
-exactly, and none of it needs a GPU.** `python artifact/table2_breaks.py` runs
+exactly, and none of it needs a GPU.** `python artifact/verify_break_elimination.py` runs
 the whole column in one command and exits non-zero on any mismatch. Verified
 end to end with the GPU hidden (`CUDA_VISIBLE_DEVICES=""`): bart-base 7 -> 0,
 opus-mt-fr-en 6 -> 0, grounding-dino 17 -> 7 and t5-small 3 -> 0, all PASS.
@@ -195,7 +195,7 @@ breaks, reading 19 where the reference reads 17.
 The fp32 CPU rows are kept as they are, because the paper's correctness claim is
 that **FP32** outputs are bit-identical and that is the quantity `output_ok`
 checks. The two paths measure different things deliberately, and
-`table2_breaks.py` routes each row to the one that matches the paper.
+`verify_break_elimination.py` routes each row to the one that matches the paper.
 
 `chronos-bolt-small` needed a third kind of fix. Its breaks are logger calls
 inside the pipeline WRAPPER rather than the inner model, so a bare forward sees
