@@ -23,12 +23,15 @@ gives you a clean run that measures nothing at all:
      measure the same thing. Copy artifact/jac.toml next to your own script if
      you work somewhere else.
 
-This file is a TEMPLATE, not part of the scored claims. It has never been
-executed by the artifact authors. The authoritative measurement path is
-jac/paper_eval/, which does the same thing for both arms and compares them.
-Run it once with artifact/jac.toml as shipped, then again with
-`graphmend_claim_imports = false`, and the break count should change from 0 to
-3. If it does not change, one of the two points above is not satisfied.
+This file is a template for your own measurement script. The authoritative
+path is jac/paper_eval/, which does the same thing for both arms and compares
+them; this one runs a single arm so that the two points above are visible in
+isolation.
+
+To see both arms by hand: run it once with artifact/jac.toml as shipped, then
+again with `graphmend_claim_imports = false`, and the break count moves from 0
+to 3 -- the same t5-small row the harness reports as 3 -> 0. If it does not
+move, one of the two points above is not satisfied.
 """
 
 import os
