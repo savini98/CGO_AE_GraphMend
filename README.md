@@ -118,7 +118,9 @@ It gates on what is hardware-independent: graph breaks reaching zero, and
 CUDA-graph launches per forward collapsing to one (t5-small 4 → 1, MoLFormer-XL
 50 → 1, Phi-4-mini 5 → 1), with a wide 1.5× floor on cold start. Steady state
 and throughput are printed but not gated. A different GPU will not land on
-Table 2's magnitudes and is not meant to.
+Table 2's magnitudes and is not meant to. That split is the declared tolerance:
+exact where the result is deterministic, a floor where it depends on the card,
+and no gate where any fixed threshold would fail honest hardware.
 
 ## What this artifact does not cover
 

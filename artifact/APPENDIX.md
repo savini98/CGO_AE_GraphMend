@@ -64,7 +64,9 @@ out of scope.
   full-graph capture. Measuring latency needs an NVIDIA GPU (verified on an
   RTX 3090; the paper used RTX 3090 / A40 / H100). **Give Docker at least
   12 GB**: Phi-4-mini peaks near 9.7 GB and is SIGKILLed below that.
-- **Run-time state:** none persisted between runs beyond a compiler cache.
+- **Run-time state:** cold-cache sensitive. The GPU script gives each arm a
+  private TorchInductor cache so cold start is genuinely cold; the container
+  warms the Jac compiler cache at build time. Nothing else persists.
 - **Execution:** `bash artifact/run_all.sh`, then the full sweep with
   `python -m paper_eval.run_eval`.
 - **Metrics:** graph breaks before and after (`breaks = FX graphs - 1`); fix
@@ -242,6 +244,13 @@ with a wide 1.5x floor on cold start rather than an expected value. Steady state
 and throughput are printed but not gated, since both move with the card and the
 batch size. A GPU other than the paper's will not land on Table 2's magnitudes
 and is not expected to.
+
+Expected variation, stated per claim class: break counts, launch counts, output
+fingerprints and full-graph capture are deterministic and must match exactly.
+Cold start must clear the 1.5x floor on any CUDA device; the paper's RTX 3090
+measures 3.5x to 24.7x on the three benchmarked models. Steady state and
+throughput carry no validation threshold, deliberately, because a fixed bound
+would fail honest runs on different hardware.
 
 ## A.7 Experiment customization
 

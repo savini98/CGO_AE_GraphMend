@@ -184,6 +184,13 @@ forward collapsing to one (t5-small 4 → 1, MoLFormer-XL 50 → 1, Phi-4-mini
 value. Steady state and throughput are printed but not gated. A different GPU
 will not land on Table 2's magnitudes and is not meant to.
 
+Stated as expected variation: break counts, launch counts, output fingerprints
+and full-graph capture are deterministic and must match exactly. Cold start
+must clear 1.5× on any CUDA device — the paper's RTX 3090 measures 3.5× to
+24.7× on the three benchmarked models. Steady state and throughput carry no
+validation threshold, deliberately: both move with the card and the batch size,
+so a fixed bound would fail honest runs on different hardware.
+
 [`gpu/bench.py`](gpu/bench.py) can be called on one model
 (`--count`, `--json`, `--paper-batch`, `--save-traces`), and
 [`gpu/from_trace.py`](gpu/from_trace.py) reports cold start, steady state and

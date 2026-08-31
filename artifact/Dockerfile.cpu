@@ -74,11 +74,12 @@ ENV PYTHONUNBUFFERED=1 \
 # process looks, whatever uid or HOME the container runs as.
 ENV XDG_CACHE_HOME=/opt/jac/cache
 
-# bash for run_all.sh; the slim image has it, this only makes it explicit and
-# adds nothing else. No compiler toolchain is needed: torch, numpy,
-# transformers and their dependencies all ship manylinux wheels for cp313.
+# bash for run_all.sh; git for setup.sh, whose `git apply` puts the GraphMend
+# patch onto the copied submodule -- the slim image ships neither git nor a
+# compiler toolchain. Nothing else is needed: torch, numpy, transformers and
+# their dependencies all ship manylinux wheels for cp313.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends bash ca-certificates \
+    && apt-get install -y --no-install-recommends bash ca-certificates git \
     && rm -rf /var/lib/apt/lists/*
 
 # PyPI's torch bundles the multi-GB CUDA stack. This index serves the CPU

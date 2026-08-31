@@ -95,7 +95,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # this because it only ever counts graphs, which does not codegen.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        bash ca-certificates build-essential \
+        bash ca-certificates build-essential git \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --index-url "${TORCH_INDEX}" \

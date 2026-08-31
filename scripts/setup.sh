@@ -38,6 +38,14 @@ SENTINEL="$SUB/jac/jaclang/compiler/passes/graphmend/scope_facts.jac"
 
 step() { printf '\n==> %s\n' "$1"; }
 
+# `git apply` is how the patch lands, and its absence must not masquerade as a
+# patch mismatch: the apply step silences stderr to keep the happy path quiet,
+# which would swallow "git: command not found" too.
+if ! command -v git >/dev/null 2>&1; then
+    echo "ERROR: git is not installed, and applying patches/graphmend.patch needs it."
+    exit 1
+fi
+
 step "submodule"
 if [ ! -e "$SUB/jac/README.md" ]; then
     echo "    fetching jaseci at $PINNED"
