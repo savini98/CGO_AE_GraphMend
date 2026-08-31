@@ -142,8 +142,23 @@ Stated here rather than left for a reviewer to discover:
 
 Docker is the supported path and pins everything. To run without it you need
 Python 3.13, `torch==2.12.1`, `transformers==4.52.4`, `numpy==2.4.6` and
-`torchvision==0.27.1`, plus the typeshed stubs, which are gitignored and are
-materialized by:
+`torchvision==0.27.1`.
+
+Four of the six network rows additionally need packages their Hub remote code
+imports, and `transformers` raises a bare `ImportError` naming one of them if
+they are absent rather than skipping the row:
+
+```bash
+pip install timm einops accelerate transformers-stream-generator chronos-forecasting
+```
+
+`timm` is Florence-2, `transformers-stream-generator` is Qwen-Audio-Chat,
+`chronos-forecasting` is chronos-bolt-small, and `accelerate` is needed by any
+row that loads with a device map. Both Dockerfiles install all of these, which
+is why the containerised runs never hit it. The 21 offline rows need none of
+them.
+
+You also need the typeshed stubs, which are gitignored and are materialized by:
 
 ```bash
 python artifact/fetch_typeshed.py jac
