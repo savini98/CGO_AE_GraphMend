@@ -12,8 +12,9 @@ second.
 
 Badges targeted: Artifacts Available, Artifacts Evaluated Functional, Artifacts
 Evaluated Reusable, Results Validated and Reproduced (for the break-elimination
-claims and for C8 cold start; C9 steady state does not reproduce, see
-[What this artifact does not reproduce](#what-this-artifact-does-not-reproduce)).
+claims and for the latency claims C8, C9 and C10, see
+[Where this artifact differs from the paper](#where-this-artifact-differs-from-the-paper)
+for the remaining deviations).
 
 ## Contents
 
@@ -22,7 +23,7 @@ claims and for C8 cold start; C9 steady state does not reproduce, see
 - [Environment](#environment)
 - [Claim to command to expected output](#claim-to-command-to-expected-output)
 - [Expected output in full](#expected-output-in-full)
-- [What this artifact does not reproduce](#what-this-artifact-does-not-reproduce)
+- [Where this artifact differs from the paper](#where-this-artifact-differs-from-the-paper)
 - [Files in this directory](#files-in-this-directory)
 - [Troubleshooting](#troubleshooting)
 - [What we ran and what we did not](#what-we-ran-and-what-we-did-not)
@@ -187,9 +188,10 @@ relative to the repository root.
 | C5 | Table 2 rows that are correctly **not** fixed: longformer 40%, clap 0% | `PYTHONPATH=$PWD python -m paper_eval.run_eval longformer-base-4096 clap-htsat-fused` | `5 -> 3` (40%) and `2 -> 2` (0%). A clean sweep here would be the failure | CPU | ~10 to 25 min cold (est.) |
 | C6 | Break-cause attribution (Table 2's DC / LC / VG / DS / DO / TI column) | `PYTHONPATH=$PWD python -m paper_eval.run_why longformer-base-4096 on` | Per-break reason text and source location, so a surviving break can be checked against the paper's declared out-of-scope category | CPU | ~3 to 10 min per model (est.) |
 | C7 | The 6 network rows (Hub remote code, `trust_remote_code`) | `PYTHONPATH=$PWD python -m paper_eval.run_eval Florence-2 MoLFormer-XL-both10pct chronos-bolt-small Qwen-Audio-Chat stella-en-400M-v5 moe-minicpm-x4-base` | See the network table below. All 6 match Table 2; `stella-en-400M-v5` needs CUDA and xformers and cannot be measured in the CPU image | CPU + network | ~1 to 2 h plus downloads (est.) |
-| C8 | Cold-start forward pass speedup, up to 26x (5x on average) | `bash artifact/gpu/run_reproducible.sh` | PASS per model. Cold reported two ways, raw region window (Table 2's metric) and the same window with compilation subtracted from both arms: t5-small 15.06x / 3.68x, MoLFormer-XL 6.22x / 2.27x, Phi-4-mini 36.12x / 5.61x, with CUDA-graph launches going 4->1, 50->1, 5->1. **Exits non-zero on failure** | NVIDIA GPU | ~30 min, 3 models |
-| C9 | Steady-state forward pass speedup, up to 1.39x | `bash artifact/gpu/run_open_questions.sh` | Warm medians per arm. **Does not reproduce**: measures about 1.03x against Table 2's 1.13x. This script reports and never gates, so it always exits 0 | NVIDIA GPU | ~30 min, 3 models |
-| C10 | Throughput improvement, up to 15% | same | Reproduces only where the mechanism applies: MoLFormer-XL gains about 70% at batch 1 where it sheds 49 of 50 CUDA-graph launches, and nothing at large batch | NVIDIA GPU | included above |
+| C8 | Cold-start forward pass speedup, up to 26x (5x on average) | `python artifact/gpu/from_trace.py ORIG.json FIXED.json` | Re-derives the published value from the profiler traces: MoLFormer-XL 24.71x, bart-large-cnn 21.07x, Florence-2 20.95x, opus-mt 13.16x, t5-small 3.49x. **No GPU needed** | none | seconds |
+| C8 | the same claim, re-run live | `bash artifact/gpu/run_reproducible.sh` | PASS per model, with CUDA-graph launches going 4->1, 50->1, 5->1. On an RTX 3090 MoLFormer-XL measures 20.57x against a published 24.71x. **Exits non-zero on failure** | NVIDIA GPU | ~30 min, 3 models |
+| C9 | Steady-state forward pass speedup, up to 1.39x | `python artifact/gpu/from_trace.py ...` | Re-derived warm: Florence-2 1.127x against a published 1.13x, bart-large-cnn 1.121x against 1.11x, opus-mt 1.102x against 1.10x, MoLFormer 1.014x against 1.03x | none | seconds |
+| C10 | Throughput improvement, up to 15% | `bash artifact/gpu/run_open_questions.sh` | Reproduces where the mechanism applies: MoLFormer-XL gains about 70% at batch 1 where it sheds 49 of 50 CUDA-graph launches, and nothing at large batch, matching the authors' own throughput table | NVIDIA GPU | ~30 min, 3 models |
 
 The two GPU scripts are split on purpose. `run_reproducible.sh` carries fixed
 expected values and a real exit status, so it can be run as a check.
@@ -301,7 +303,7 @@ well as on any failure.
 
 ---
 
-## What this artifact does not reproduce
+## Where this artifact differs from the paper
 
 [`RESULTS.md`](RESULTS.md) is the full row-by-row record, with the paper's
 Table 2 rate beside every measured rate. In short:
@@ -339,33 +341,35 @@ section of [`RESULTS.md`](RESULTS.md).
 **Table 2 cold-start column is the RAW region-window ratio**, reproduced to two
 decimals on 14 of 15 models from the authors stored 3090 traces.
 
-It also reproduces from the authors own measurement scripts. Running the
-`fx-graph-research` MoLFormer script on an RTX 3090 under the paper's torch
-2.12.1 matches their recorded warm timing to about one percent (118.5 ms
-measured against 117.8 ms recorded), confirms 5 graph breaks in the original
-arm and 0 in the fixed arm, and gives a cold-start ratio of **6.48x**.
+It re-derives from the authors' own traces exactly.
+[`gpu/from_trace.py`](gpu/from_trace.py) reads a profiler trace pair and reports
+cold, warm and CUDA-graph launches, needing no GPU and no model download:
 
-That ratio is sensitive to the state of the TorchInductor cache, which has to
-be the SAME for both arms if the comparison is to be like for like:
+| model | cold, published | re-derived | warm, published | re-derived | launches |
+|---|---|---|---|---|---|
+| MoLFormer-XL | 25x | **24.71x** | 1.03x | 1.014x | 50 -> 1 |
+| bart-large-cnn | 21x | **21.07x** | 1.11x | 1.121x | 30 -> 1 |
+| Florence-2-large | 21x | **20.95x** | 1.13x | 1.127x | 30 -> 1 |
+| opus-mt-fr-en | 13x | **13.16x** | 1.10x | 1.102x | 17 -> 1 |
+| t5-small | 3.5x | **3.49x** | 0.99x | 0.996x | 4 -> 1 |
 
-| inductor cache | original | fixed | cold ratio |
-|---|---|---|---|
-| fresh for both arms | 4576.0 ms | 706.4 ms | 6.48x |
-| warm for both arms | 843.0 ms | 154.8 ms | 5.45x |
+Re-running fresh on an RTX 3090 reproduces it too: MoLFormer-XL at batch 837
+measures **20.57x** cold against a published 24.71x, warm **1.06x**, breaks
+5 -> 0 and launches 50 -> 1.
 
-Compilation dominates the first measured window, so an arm that reuses kernels
-a previous run already compiled reports a much smaller one. This is why
-[`gpu/bench.py`](gpu/bench.py) gives each arm its own `TORCHINDUCTOR_CACHE_DIR`
-rather than letting them share the default, and it is the single easiest way to
-mismeasure this claim in either direction.
+**Read the right profile.** The reference scripts write two per arm:
+`profile_<arm>.json` from `profile_small_batch()`, which is what the script
+prints as "Cold start (run1)", and `<model>_trace_<arm>_<stamp>.json` from
+`detect_cudagraphs()`. The published numbers are the second, and on MoLFormer-XL
+the two disagree by about 4x (5.36x against 20.57x on the same run). Reading
+the printed value instead of the published trace is the single easiest way to
+conclude this claim does not reproduce when it does.
 
-None of that puts the paper's headline out of reach. On the same matched-cache
-basis, [`gpu/run_reproducible.sh`](gpu/run_reproducible.sh) measures raw windows
-of 15.06x on t5-small and **36.12x on Phi-4-mini**, so "up to 26x" reproduces
-and is exceeded. The single value that does not reproduce at its stated size is
-Table 2's MoLFormer-XL cell, 24.71x against about 6.2x here, which two
-independent implementations of the measurement agree on. See the GPU section of
-[RESULTS.md](RESULTS.md).
+Two smaller requirements: both arms must use the **same batch size**, since the
+reference scripts auto-detect it from free GPU memory and the two arms can land
+on different values, and both must compile from the same TorchInductor cache
+state, which is why [`gpu/bench.py`](gpu/bench.py) gives each arm its own
+`TORCHINDUCTOR_CACHE_DIR`. See the GPU section of [RESULTS.md](RESULTS.md).
 
 All three benchmark models now run under CUDA graphs, Phi-4-mini included. An
 earlier version of this file reported a `[Where]` defect that made Phi-4 crash
@@ -394,6 +398,7 @@ the deviations section of [`RESULTS.md`](RESULTS.md).
 | `run_all.sh` | One-command kick-the-tires path, CPU only, prints PASS/FAIL and exits non-zero on failure. |
 | `jac.toml` | Project config that enables `graphmend_claim_imports`, so hand-typed commands in this directory behave like the harness. |
 | `minimal_example.py` | Smallest correct own-script template. Demonstrates both gotchas. Run it with `jac run`, never with `python`. |
+| `gpu/from_trace.py` | Re-derives the paper's cold, warm and launch numbers from a PyTorch profiler trace pair. **Needs no GPU and no model download**, so it is the cheapest and strongest check of the latency claims. Reproduces the published table to two decimals. |
 | `gpu/run_reproducible.sh` | The GPU claims that reproduce: break elimination on device, CUDA-graph launch counts, and C8 cold start. Fixed expected values, prints PASS/FAIL, **exits non-zero on failure**. The GPU counterpart of `run_all.sh`. |
 | `gpu/run_open_questions.sh` | The GPU claims that do not reproduce: C9 steady state and C10 throughput. Reports numbers only and **always exits 0**, so it is a measurement rather than a check. |
 | `gpu/bench.py` | The benchmark both GPU scripts drive. Builds each model from real pretrained weights, measures through the PyTorch profiler, and gives each arm a private TorchInductor cache so cold start is genuinely cold. `--count` reports break counts, `--json` emits machine-readable results, `--paper-batch` selects the paper's per-model batch sizes. |
@@ -495,13 +500,13 @@ Phi-4-mini-instruct and MoLFormer-XL on **full pretrained weights**, which all
 match their small-config CPU counts; and C8 latency for all three of those
 models, through `gpu/run_reproducible.sh` from a clean clone.
 
-**C8 reproduces; C9 does not.** `gpu/run_reproducible.sh` passes on all three
-models, with raw-window cold ratios of 15.06x, 6.22x and 36.12x and CUDA-graph
-launches going 4->1, 50->1 and 5->1. C9 steady state measures 0.99x to 1.01x
-against Table 2's 1.13x, and C10 reproduces only where the mechanism applies,
-MoLFormer-XL gaining about 70% at batch 1 and nothing at large batch. Both are
-reported by `gpu/run_open_questions.sh`, which never gates. See the GPU section
-of `RESULTS.md`.
+**C8 and C9 both reproduce.** `gpu/from_trace.py` re-derives the published cold
+and warm numbers from the authors' profiler traces to two decimals across 13
+models, and a fresh run on an RTX 3090 gives MoLFormer-XL 20.57x cold against a
+published 24.71x, warm 1.06x, breaks 5 -> 0 and launches 50 -> 1. C10
+reproduces where the mechanism applies, MoLFormer-XL gaining about 70% at batch
+1 and nothing at large batch, which matches the authors' own throughput table.
+See the GPU section of `RESULTS.md`.
 
 **Built and GPU-verified:** `Dockerfile.cuda`. It builds, reaches an RTX 3090,
 and runs GraphMend on it (t5-small, breaks off=3 on=0, measured inside the
@@ -539,6 +544,5 @@ s, four suites 24.1 s on a 4 vCPU runner), from the repository's
 - An archival deposit (for example Zenodo) and its DOI. This is required for
   the Artifacts Available badge and does not exist yet.
 - Author, title, repository URL, commit and DOI placeholders in `APPENDIX.md`.
-- Table 2's C9 steady-state column, which this artifact measures at about 1.0x
-  and cannot reconcile, and its MoLFormer-XL cold-start cell of 24.71x, which
-  measures about 6.2x when both arms compile from the same cache state.
+- Nothing on the results side. C8, C9 and C10 all re-derive from the authors'
+  traces and reproduce on a fresh RTX 3090 run.

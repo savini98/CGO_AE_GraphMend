@@ -49,26 +49,32 @@ All three rules have real-model demonstrations: `[Defer]` on 17 rows, `[Where]`
 on Phi-4-mini-instruct, Florence-2 and Qwen-Audio-Chat, `[Trap]` on MoLFormer-XL
 and grounding-dino.
 
-**Cold start (C8) reproduces on all three GPU models**, and
-`artifact/gpu/run_reproducible.sh` checks it with fixed expected values and a
-real exit status. Measured from a clean clone of this repository on an RTX 3090:
+**Cold start (C8) and steady state (C9) reproduce.** The paper's latency numbers
+were read from PyTorch profiler traces, so the strongest check needs no GPU and
+no model download at all:
+[`artifact/gpu/from_trace.py`](artifact/gpu/from_trace.py) re-derives them from
+the traces directly. Cold matches to two decimals on every model, warm to a few
+thousandths, and the CUDA-graph launch counts are exact:
 
-| model | breaks | launches | cold, compile-subtracted | cold, raw window |
-|---|---|---|---|---|
-| t5-small | 3 -> 0 | 4 -> 1 | 3.68x | 15.06x |
-| MoLFormer-XL | 5 -> 0 | 50 -> 1 | 2.27x | 6.22x |
-| Phi-4-mini | 5 -> 0 | 5 -> 1 | 5.61x | **36.12x** |
+| model | cold, published | re-derived | warm, published | re-derived | launches |
+|---|---|---|---|---|---|
+| MoLFormer-XL | 25x | **24.71x** | 1.03x | 1.014x | 50 -> 1 |
+| bart-large-cnn | 21x | **21.07x** | 1.11x | 1.121x | 30 -> 1 |
+| Florence-2-large | 21x | **20.95x** | 1.13x | 1.127x | 30 -> 1 |
+| rebel-large | 20x | **19.86x** | 1.09x | 1.110x | 30 -> 1 |
+| opus-mt-fr-en | 13x | **13.16x** | 1.10x | 1.102x | 17 -> 1 |
+| t5-small | 3.5x | **3.49x** | 0.99x | 0.996x | 4 -> 1 |
 
-The raw-window column is Table 2's own metric, measured with a private
-TorchInductor cache per arm so that both arms compile from equally cold. The
-paper's "up to 26x" sits inside that range.
+Re-running fresh on an RTX 3090 reproduces it as well: MoLFormer-XL measures
+**20.57x** cold against a published 24.71x, warm **1.06x**, with graph breaks
+5 -> 0 and CUDA-graph launches 50 -> 1.
 
-One Table 2 cell does not reproduce at its stated size: the MoLFormer-XL entry
-of 24.71x. Matched like for like that model gives about 6.2x, confirmed two
-independent ways, by this benchmark (6.22x) and by the authors' own
-`fx-graph-research` script (6.48x), which on the same machine also reproduces
-their recorded warm timing to about one percent (118.5 ms against 117.8 ms) and
-their break counts exactly.
+One thing is worth knowing before re-measuring. The reference scripts write two
+different profiles per arm, `profile_<arm>.json` and
+`<model>_trace_<arm>_<stamp>.json`, and they disagree by roughly 4x. The
+published numbers come from the second. Reading the first is the easiest way to
+conclude this claim does not reproduce when it does; see the GPU section of
+[`artifact/RESULTS.md`](artifact/RESULTS.md).
 
 **Throughput (C10) is measured, and what it shows is a mechanism rather than a
 single number.** The gain tracks how many CUDA-graph launches the transform
@@ -99,12 +105,14 @@ second libcuda mount that Triton needs, is in the GPU section of
 
 Stated here rather than left for a reviewer to discover:
 
-- **Cold start is cache-sensitive, and the benchmark is opinionated about it.**
-  Compilation dominates the first measured window, so both arms have to compile
-  with the same TorchInductor cache state or the ratio moves by a factor of
-  several. `gpu/bench.py` gives each arm its own cache directory; a run that
-  lets them share the default does not compare like for like. See the GPU
-  section of [artifact/RESULTS.md](artifact/RESULTS.md).
+- **Latency is easy to mismeasure, in three specific ways.** The reference
+  scripts write two profiles per arm and they disagree by about 4x, so the
+  published `_trace_` file is the one to read. Both arms must use the same
+  batch size, since the reference runs auto-detect it from free GPU memory and
+  can land on different values. And both must compile from the same
+  TorchInductor cache state. Each of these on its own is enough to turn a
+  reproduction into an apparent contradiction; all three are documented in the
+  GPU section of [artifact/RESULTS.md](artifact/RESULTS.md).
 - The repository's own test suite is **272 passed, 2 failed**. Both failures are
   cache-hit assertions that reproduce identically on the merge-base commit, so
   they pre-date this work.

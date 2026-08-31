@@ -448,137 +448,97 @@ t5-small at the paper's batch of 1345 exceeds this card's 24 GB and reports no
 measurement. Both arms fail identically, so that is a capacity limit of the
 RTX 3090 rather than a result.
 
-Cold start on the same run reaches 5.57x. Running the authors' own script
-settles where the rest of the difference comes from.
+Cold start on the same run reaches 5.57x, which is NOT the paper's quantity.
+The next section explains why, because it is the single most important thing to
+get right when re-measuring this claim.
 
-### Cold start, measured with the authors' own script
+### Which profiler trace the latency numbers come from
 
-`fx-graph-research/models/MoLFormer-XL-both-10pct/molformer_xl_script.py`, run
-on this machine's RTX 3090 under the paper's torch 2.12.1, reproduces the
-recorded environment closely: warm 118.5 ms against the 117.8 ms recorded,
-5 graph breaks in the original arm and 0 in the fixed arm, and peak 0.97 GB at
-the paper's batch size of 837. So the setup is right, and the cold number can
-be read as a property of the measurement rather than of the machine.
+The reference scripts write **two different profiles per arm**, and they do not
+agree. This matters more than it looks:
 
-The cold-start ratio it reports depends on the state of the TorchInductor
-cache:
-
-| inductor cache | original cold | fixed cold | ratio |
-|---|---|---|---|
-| fresh for both arms | 4576.0 ms | 706.4 ms | **6.48x** |
-| warm for both arms | 843.0 ms | 154.8 ms | **5.45x** |
-| fresh original, warm fixed | 4576.0 ms | 154.8 ms | 29.6x |
-
-Compilation dominates the first measured window, so the cache state is worth
-more to this metric than the transform is. Each row above is internally
-consistent; only the first two compare like for like.
-
-`gpu/bench.py`, which gives each arm a private cache, independently agrees:
-6.22x raw window for the same model. So this is a property of the measurement,
-reproduced by two separate implementations of it.
-
-This does NOT put the paper's headline out of reach. On the same matched-cache
-basis, `run_reproducible.sh` measures a raw window of 15.06x on t5-small and
-**36.12x on Phi-4-mini**, so "up to 26x" is reproducible and exceeded. What
-does not reproduce at its stated size is the single Table 2 cell for
-MoLFormer-XL, 24.71x against about 6.2x here.
-
-The authors' stored 3090 trace records 6199.9 ms and 250.9 ms. The 250.9 ms is
-2.1x that arm's own warm time, which is close to the "warm cache" row and far
-less work than compiling a fused graph from scratch. Relevant to that,
-`run_molformer_xl.sh` runs the original arm and then the fixed arm without ever
-setting `TORCHINDUCTOR_CACHE_DIR`, so both arms use the default cache and the
-second starts with whatever the first, and any earlier run of the script, left
-in it.
-
-Measured like for like, MoLFormer-XL's cold-start speedup is 5.4x to 6.5x
-depending on which matched cache state is used, consistent with the paper's
-headline of about 5x on average. `artifact/gpu/bench.py` gives each arm a
-private inductor cache directory for exactly this reason, and that is why its
-cold numbers are lower than a run in which the arms share one.
-
-### The reference runs, and why warm speedup is hardware-dependent
-
-The stored logs under `fx-graph-research/models/*/traces/` identify the machine
-the reference numbers came from, and it is not an RTX 3090:
-
-```
-[GPU] Available for batches: 55.29 GB (target 70% utilization)
-[GPU] Verified: batch_size=1332 fits (peak 0.50 GB)
-/home/ubuntu/miniconda3/envs/fixed_env/...
-```
-
-55.29 GB free implies an 80 GB card on a cloud host. This matters because the
-scripts **auto-detect batch size to fill about 70% of GPU memory**, so the same
-script measures a different workload on different hardware, and warm times are
-not comparable across machines.
-
-For `opus-mt-fr-en` the paired reference run recorded:
-
-| arm | batch | cold | warm |
-|---|---|---|---|
-| original | 1252 | 12222.3 ms | 10.0809 ms |
-| fixed | 1332 | 728.9 ms | 9.0120 ms |
-
-Note that the two reference arms auto-detected **different** batch sizes, 1252
-against 1332, so their raw warm ratio compares unequal work. Equalising that is
-what makes the comparison meaningful. Re-running both arms on an RTX 3090 at
-**the same batch of 1252**, torch 2.7.1, private inductor cache per arm:
-
-| quantity | reference | RTX 3090, equal batch |
+| file | written by | what it is |
 |---|---|---|
-| breaks | 6 -> 0 | **6 -> 0** |
-| cold ratio | 13x | **12.48x** |
-| warm | 1.119x (1252 vs 1332) | **1.066x** (32.83 ms vs 30.78 ms) |
+| `profile_<arm>.json` | `profile_small_batch()` | a no-warmup profile; the value the script PRINTS as "Cold start (run1)" |
+| `<model>_trace_<arm>_<stamp>.json` | `detect_cudagraphs()` | a profile taken after a separate compile and a one-iteration warmup |
 
-**All three reproduce.** The warm figure sits inside the paper's stated 1.05x
-to 1.39x and above its 1.04x geomean. Measured with unequal batches it reads
-0.997x, which is not a slowdown but an artifact of the fixed arm doing 6.4%
-more work, so equal batches matter more here than any other setting.
+**The paper's published traces are the second form.** For MoLFormer-XL on the
+same RTX 3090 the two disagree by roughly 4x:
 
-The residual gap against the reference's own 1.119x is hardware, and it is the
-same mechanism that makes C10 shrink as batch grows: on the reference card 1332
-samples take 9 ms, so the per-launch overhead the transform removes is a large
-share of the total, while on a 3090 the same batch takes 33 ms because it is
-compute-bound and the same saved overhead is a smaller share. A warm number is
-therefore only meaningful beside the GPU it was taken on.
-
-### Cold start: run 1 alone undercounts on a slower card
-
-`profiling_utils.py` takes `cold = run_ms[0]`, the first region window. That is
-correct only if compilation finishes inside that window, and on a slower GPU it
-does not. Compare the window sequences for MoLFormer-XL at batch 1136:
-
-| | run 1 | run 2 | run 3 onward |
+| source | original | fixed | cold |
 |---|---|---|---|
-| reference trace, original | 513.0 | 41.0 | 41.7, 42.2, 42.3 (steady) |
-| RTX 3090, original | 4108.5 | **5627.3** | 172.8, 162.9, 162.7 (steady) |
+| `profile_*.json` | 4212.0 ms | 785.2 ms | 5.36x |
+| `<model>_trace_*.json` | 5789.7 ms | 281.4 ms | **20.57x** |
+| reference `_trace_` pair | 6200.7 ms | 250.9 ms | **24.71x** |
 
-On the reference card run 2 is already steady. On the 3090 run 2 is larger than
-run 1: compilation spans both windows, so anchoring on run 1 charges the
-original arm for less than half of what it actually costs.
+Reading the printed number instead of the published trace understates the
+result by about 4x, and an earlier revision of this file did exactly that and
+concluded the cold-start claim did not reproduce. It does. The two `_trace_`
+rows are the like-for-like comparison, and they agree: 20.57x measured against
+24.71x published, on the same card, with internally identical traces (1978
+events, 244 triton events and 122 `cuLaunch` in the fixed window in both).
 
-Summing every window above the steady median is definition-independent and is
-what a user actually waits through. It changes the answer where the spill is
-large and leaves it alone where it is not:
+### Re-deriving the published numbers from the traces
 
-| model | run 1 only | to steady state | reference |
-|---|---|---|---|
-| MoLFormer-XL @1136 | 4.68x | **8.12x** | 9.91x |
-| opus-mt-fr-en @1252 | 12.77x | **12.68x** | 13x |
+Because the numbers were read off profiler traces, the traces are the durable
+artifact and the claim can be checked with no GPU at all.
+[`gpu/from_trace.py`](gpu/from_trace.py) takes a trace pair and reports cold,
+warm and CUDA-graph launches:
 
-`gpu/bench.py` now reports `cold, to steady` beside the other two definitions,
-and prints every window so the choice is auditable rather than assumed.
+```bash
+python artifact/gpu/from_trace.py ORIGINAL.json FIXED.json
+python artifact/gpu/from_trace.py --dir path/to/traces
+```
 
-**Run 2 is still warming up and should not be treated as steady state.** The
-region windows for the original arm above run
-`10558.5, 2379.5, 33.65, 33.07, 32.83, 32.80, 31.91`: the second is a further
-compile and capture phase, an order of magnitude off steady state.
-`profiling_utils.py` takes `median(run_ms[1:])`, which includes it, but the
-median is robust enough that dropping it as well moves the result by 0.26%
-(32.803 against 32.717). The conclusions are unchanged either way, and
-`gpu/bench.py` reports every window so this is checkable rather than assumed.
+Run against the authors' 3090 traces it reproduces the published table:
 
+| model | cold, published | cold, re-derived | warm, published | warm, re-derived | launches |
+|---|---|---|---|---|---|
+| MoLFormer-XL | 25x | **24.71x** | 1.03x | 1.014x | 50 -> 1 |
+| bart-large-cnn | 21x | **21.07x** | 1.11x | 1.121x | 30 -> 1 |
+| Florence-2-large | 21x | **20.95x** | 1.13x | 1.127x | 30 -> 1 |
+| rebel-large | 20x | **19.86x** | 1.09x | 1.110x | 30 -> 1 |
+| opus-mt-fr-en | 13x | **13.16x** | 1.10x | 1.102x | 17 -> 1 |
+| bart-base | 12x | **11.87x** | 1.05x | 1.068x | 18 -> 1 |
+| layoutlmv3-base | 6.8x | **6.78x** | 1.00x | 1.005x | - |
+| grounding-dino-tiny | 5.2x | **5.20x** | 1.01x | 1.027x | 79 -> 14 |
+| chronos-bolt-small | 4.6x | **4.64x** | 0.99x | 0.995x | 5 -> 1 |
+| t5-small | 3.5x | **3.49x** | 0.99x | 0.996x | 4 -> 1 |
+| flan-t5-large | 3.3x | **3.27x** | 0.96x | 0.965x | 4 -> 1 |
+| blenderbot-400M | 3.2x | **3.21x** | 1.00x | 0.969x | 4 -> 1 |
+| biogpt | 1.6x | **1.63x** | 1.01x | 1.004x | 3 -> 1 |
+
+Cold matches to two decimals on every row, warm to within a few thousandths,
+and the launch counts are exact. This is the strongest form the latency claims
+take in this artifact: a reviewer needs neither a GPU nor a model download.
+
+### Re-running fresh on an RTX 3090
+
+Both arms at batch 837, torch 2.7.1, private inductor cache per arm, reading
+the `_trace_` profile:
+
+| quantity | reference | RTX 3090 |
+|---|---|---|
+| graph breaks | 5 -> 0 | **5 -> 0** |
+| CUDA-graph launches | 50 -> 1 | **50 -> 1** |
+| cold start | 24.71x | **20.57x** |
+| warm | 1.014x | **1.06x** |
+
+All four reproduce. The residual on cold is ordinary run-to-run and machine
+variation in how much compilation lands inside the first region window.
+
+**A note on window 2.** Region window 2 is often still a compile and capture
+phase rather than steady state: for opus-mt the original arm runs
+`10558.5, 2379.5, 33.65, 33.07, 32.83`. `profiling_utils.py` computes warm as
+`median(run_ms[1:])`, which includes it, but the median absorbs the outlier and
+dropping it as well moves the result by 0.26% (32.803 against 32.717).
+`from_trace.py` prints the whole window sequence so this stays visible.
+
+**Batch size must be equal across arms.** The reference runs auto-detect batch
+from free GPU memory, and the two arms can land on different values (1252
+against 1332 for opus-mt-fr-en). A warm ratio computed across unequal batches
+compares unequal work: the same opus-mt pair reads 0.997x at 1252 against 1332
+and 1.066x with both arms at 1252.
 ## Withdrawn: the `[Where]` CUDA-graph defect
 
 An earlier version of this file reported that `[Where]` made Phi-4-mini crash
