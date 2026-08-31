@@ -1,13 +1,14 @@
 % GraphMend, CGO 2027 -- Artifact Appendix.
 %
-% Structure follows the ctuning AE template (ae-20190108.tex); style and
-% length follow the PyTorch 2 artifact appendix (ASPLOS '24), which is the
-% closest comparable in this space.
+% Structure: ctuning AE template (ae-20190108.tex).
+% Style/length: PyTorch 2 (ASPLOS '24) and Synthesis of Sorting Kernels
+% (CGO '25), both compact and claim-anchored. Sized for TWO pages.
 %
-% Place BEFORE \bibliography. Requires \usepackage{artifact-evaluation} or
-% equivalent; plain \appendix works too.
-%
-% PLACEHOLDERS TO FILL: {{REPO_URL}}, {{COMMIT}}, {{DOI}}.
+% Place BEFORE \bibliography.
+% PLACEHOLDERS: {{REPO_URL}}, {{COMMIT}}, {{DOI}}.
+% LABELS to map to the paper: tab:benchmark, fig:phi4, fig:throughput,
+%   fig:overhead, sec:eval, sec:coldstart, sec:steadystate, sec:throughput,
+%   sec:serving, sec:overhead.
 
 \appendix
 \section{Artifact Appendix}
@@ -16,292 +17,202 @@
 
 The artifact contains the GraphMend implementation, its three AST-level
 transformations (Predicated Data-Dependent Control Flow, Graph-Epilogue
-Deferred Side Effects, and Predicated Trap Lowering), the per-model benchmark
-drivers for the 27 Hugging Face models of Table~\ref{tab:benchmark}, and
-scripts for graph-break detection, output-correctness checking, full-graph
-capture, latency and throughput measurement, profiler collection, and
-compiler-overhead measurement. It reproduces the key results of
-Section~\ref{sec:eval}.
+Deferred Side Effects, Predicated Trap Lowering), benchmark drivers for the 27
+Hugging Face models of Table~\ref{tab:benchmark}, and scripts for graph-break
+detection, correctness checking, full-graph capture, latency and throughput
+measurement, profiler collection, and compiler-overhead measurement. It
+reproduces the results of Section~\ref{sec:eval}.
 
-The primary claims -- break elimination, output correctness, and full-graph
-capture -- are \emph{CPU-only}: they need no GPU, no pretrained weights, and,
-for 21 of the 27 models, no network access. The latency and throughput results
-of Sections~\ref{sec:coldstart}--\ref{sec:throughput} depend on the GPUs used
-in the paper and are provided as scripts that measure on the reviewer's own
-hardware. A container image pins the software stack, and a single
-\texttt{run\_quick.sh} gives a pass/fail functional result in 10--20 minutes.
+Break elimination, correctness and full-graph capture are \emph{CPU-only}: no
+GPU, no pretrained weights, and no network for 21 of the 27 models. The latency
+and throughput results depend on the GPUs used in the paper and are provided as
+scripts that measure on the reviewer's own hardware. A container pins the
+software stack; \texttt{scripts/run\_quick.sh} gives a pass/fail functional
+result in 10--20 minutes.
 
 \subsection{Artifact check-list (meta-information)}
 
 {\small
-\begin{itemize}
-  \item {\bf Algorithm:} three source-level, legality-guarded program
-    transformations applied to PyTorch model code claimed at import time.
-  \item {\bf Program:} GraphMend, implemented in the Jaseci/Jac compiler;
-    PyTorch 2.12.1; Hugging Face Transformers 4.52.4.
-  \item {\bf Compilation:} the toolchain is upstream \texttt{jaseci-labs/jaseci}
-    at commit \texttt{e2b6b9f4b} (jaclang 0.36.1) plus
-    \texttt{patches/graphmend.patch} (203 files, 166 new). It is used from
-    source on \texttt{PYTHONPATH} and declares no runtime PyPI dependencies.
-  \item {\bf Transformations:} Predicated Data-Dependent Control Flow
-    (\textsc{[Where]}), Graph-Epilogue Deferred Side Effects (\textsc{[Defer]}),
-    Predicated Trap Lowering (\textsc{[Trap]}); enabled by
-    \texttt{[run] graphmend = true} (default) together with
-    \texttt{[run] graphmend\_claim\_imports = true} (\emph{not} default).
-  \item {\bf Model:} the 27 Hugging Face models of Table~\ref{tab:benchmark}
-    that exhibit graph breaks. 21 are built offline from small configurations
-    with random weights; 6 require network access and
-    \texttt{trust\_remote\_code}.
-  \item {\bf Data set:} none. Inputs are synthetic tensors of fixed shape,
-    seeded with \texttt{torch.manual\_seed(0)}.
-  \item {\bf Run-time environment:} Linux or macOS, Python 3.13. Container
-    images pin the full stack for both the CPU and the GPU experiments.
-  \item {\bf Hardware:} any x86-64 or arm64 CPU with 12\,GB of memory for the
-    primary claims. Latency and throughput need an NVIDIA GPU; the paper used
-    RTX 3090, A40 and H100 with CUDA 12.6 and Triton 3.7.
-  \item {\bf Run-time state:} cold-cache sensitive. Each arm of the latency
-    benchmark is given a private TorchInductor cache so that cold start is
-    genuinely cold; the container warms the Jac compiler cache at build time.
-  \item {\bf Execution:} \texttt{bash scripts/run\_quick.sh} for the functional
-    workflow; \texttt{bash scripts/run\_full.sh} for the full reproduction.
-  \item {\bf Metrics:} graph-break count (FX graphs $-$ 1); fix rate; output
-    fingerprint equality; whether \texttt{torch.compile(fullgraph=True)}
-    captures; cold-start and steady-state forward-pass latency; CUDA-graph
-    launches per forward; end-to-end throughput; compiler overhead over
-    standard Python.
-  \item {\bf Output:} a table per experiment, printed to stdout, with the
-    claim and its expected result stated in the banner of each script.
-    Reference output is in \texttt{artifact/README.md}.
-  \item {\bf Experiments:} 4 rule-level graph-count suites (18 tests); 21
-    offline model rows; 6 network model rows; per-break cause reporting;
-    full-graph capture per arm; compiler overhead; and, on a GPU, break counts,
-    CUDA-graph launches, cold start, steady state and throughput.
-  \item {\bf How much disk space required (approximately)?:} 135\,MB for a
-    clone with the submodule; 1.4\,GB for the built CPU image, or roughly
-    5\,GB with the build cache. The 6 network rows add a few GB of Hub
-    downloads.
-  \item {\bf How much time is needed to prepare workflow (approximately)?:}
-    about 5 minutes for the container build, most of it the PyTorch wheel
-    download and the build-time compiler-cache warm.
-  \item {\bf How much time is needed to complete experiments
-    (approximately)?:} 10--20 minutes for the functional workflow; roughly
-    1.5--3 hours for the 21-row offline sweep on a cold cache; a further
-    30--60 minutes for the GPU experiments.
-  \item {\bf Publicly available?:} yes, {{REPO\_URL}} at commit {{COMMIT}}.
-  \item {\bf Code licenses (if publicly available)?:} MIT.
-  \item {\bf Data licenses (if publicly available)?:} not applicable; no data
-    set is distributed.
-  \item {\bf Workflow framework used?:} none; plain shell and Python.
-  \item {\bf Archived (provide DOI)?:} {{DOI}}.
+\begin{itemize}\itemsep0pt
+  \item {\bf Algorithm:} three legality-guarded source-level transformations.
+  \item {\bf Program:} GraphMend, in the Jaseci/Jac compiler; PyTorch 2.12.1;
+    Transformers 4.52.4.
+  \item {\bf Compilation:} upstream \texttt{jaseci-labs/jaseci} at
+    \texttt{e2b6b9f4b} (jaclang 0.36.1) plus \texttt{patches/graphmend.patch}
+    (203 files, 166 new); used from source, no runtime PyPI dependencies.
+  \item {\bf Transformations:} \textsc{[Where]}, \textsc{[Defer]},
+    \textsc{[Trap]}; enabled by \texttt{graphmend = true} (default) plus
+    \texttt{graphmend\_claim\_imports = true} (\emph{not} default).
+  \item {\bf Model:} the 27 models of Table~\ref{tab:benchmark}; 21 built
+    offline from small configurations, 6 needing \texttt{trust\_remote\_code}.
+  \item {\bf Data set:} none; synthetic tensors seeded with
+    \texttt{manual\_seed(0)}.
+  \item {\bf Run-time environment:} Linux or macOS, Python 3.13; container
+    images provided for CPU and GPU.
+  \item {\bf Hardware:} any x86-64/arm64 CPU with \textbf{12\,GB of memory} for
+    the primary claims; an NVIDIA GPU for latency and throughput (paper: RTX
+    3090, A40, H100; CUDA 12.6, Triton 3.7).
+  \item {\bf Run-time state:} cold-cache sensitive; each arm gets a private
+    TorchInductor cache so cold start is genuinely cold.
+  \item {\bf Execution:} \texttt{scripts/run\_quick.sh}, then
+    \texttt{scripts/run\_full.sh}.
+  \item {\bf Metrics:} graph-break count (FX graphs $-1$); fix rate; output
+    fingerprint equality; full-graph capture; cold-start and steady-state
+    latency; CUDA-graph launches per forward; throughput; compiler overhead.
+  \item {\bf Output:} a table per experiment on stdout; each script prints the
+    claim it checks and the expected result. Reference output in
+    \texttt{artifact/README.md}.
+  \item {\bf Experiments:} 4 rule-level suites (18 tests); 21 offline and 6
+    network model rows; break-cause reporting; full-graph capture; compiler
+    overhead; GPU latency and throughput.
+  \item {\bf Disk:} 135\,MB for a clone; 1.4\,GB for the CPU image ($\approx$
+    5\,GB with build cache); a few GB more for the network rows.
+  \item {\bf Time to prepare:} $\approx$ 5 minutes (container build).
+  \item {\bf Time to complete:} 10--20 minutes functional; 1.5--3 hours for the
+    21-row sweep on a cold cache; 30--60 minutes for the GPU experiments.
+  \item {\bf Publicly available?:} yes, {{REPO\_URL}} at {{COMMIT}}.
+  \item {\bf Code licenses:} MIT.
+  \item {\bf Archived (DOI)?:} {{DOI}}.
 \end{itemize}
 }
 
 \subsection{Description}
 
 \subsubsection{How to access}
-
-\begin{itemize}
-  \item Repository: {{REPO\_URL}}, commit {{COMMIT}}. Clone with
-    \texttt{-{}-recurse-submodules}.
-  \item Archived copy: {{DOI}}. The deposit is self-contained: the toolchain
-    and the typeshed stubs are flattened into it, so it needs no network.
-\end{itemize}
-
-The compiler is not vendored. \texttt{jaseci/} is the upstream toolchain as a
-submodule frozen at \texttt{e2b6b9f4b}, and
-\texttt{patches/graphmend.patch} is everything GraphMend adds to it, so the
-patch is a direct statement of the contribution.
-\texttt{scripts/setup.sh} verifies the pin, applies the patch, and fetches the
-typeshed stubs; it is idempotent.
+Repository {{REPO\_URL}} at commit {{COMMIT}}, cloned with
+\texttt{-{}-recurse-submodules}; archived at {{DOI}}. The compiler is not
+vendored: \texttt{jaseci/} is the upstream toolchain frozen at a commit and
+\texttt{patches/graphmend.patch} is everything GraphMend adds, so the patch is a
+direct statement of the contribution. \texttt{scripts/setup.sh} verifies the
+pin, applies the patch and fetches the typeshed stubs; it is idempotent, and the
+archived copy is self-contained.
 
 \subsubsection{Hardware dependencies}
-
-\begin{itemize}
-  \item Break elimination, correctness, full-graph capture and compiler
-    overhead: any x86-64 or arm64 CPU. \textbf{12\,GB of memory is required};
-    \texttt{Phi-4-mini-instruct} peaks near 9.7\,GB while GraphMend compiles
-    the imported modeling code, and a smaller ceiling causes the container to
-    be killed by the OOM killer.
-  \item Latency and throughput: one NVIDIA GPU. Functional validation works on
-    any sufficiently recent device; reproducing the magnitudes of
-    Table~\ref{tab:benchmark} requires the RTX 3090, A40 or H100
-    configurations used in the paper.
-\end{itemize}
+Any x86-64 or arm64 CPU for break elimination, correctness, full-graph capture
+and compiler overhead. \textbf{12\,GB of memory is required}:
+\texttt{Phi-4-mini-instruct} peaks near 9.7\,GB while GraphMend compiles the
+imported modeling code, and less causes an out-of-memory kill. Latency and
+throughput need one NVIDIA GPU; GraphMend is functional on any sufficiently
+recent device, but reproducing the magnitudes in Table~\ref{tab:benchmark}
+requires the paper's RTX 3090, A40 or H100 configurations.
 
 \subsubsection{Software dependencies}
+Python 3.13, PyTorch 2.12.1, Transformers 4.52.4, NumPy 2.4.6, torchvision
+0.27.1, \texttt{git}, and Docker for the pinned path; NVIDIA drivers, CUDA 12.6
+and Triton 3.7 for the GPU experiments. Versions are pinned exactly rather than
+floored: a graph-break count is a property of what TorchDynamo splits on, so a
+different PyTorch release can report a different number.
 
-\begin{itemize}
-  \item A recent Linux distribution or macOS, and \texttt{git}
-  \item Python 3.13
-  \item PyTorch 2.12.1, Transformers 4.52.4, NumPy 2.4.6, torchvision 0.27.1
-  \item For the GPU experiments: NVIDIA drivers, CUDA 12.6, Triton 3.7
-  \item Docker, for the pinned container path
-\end{itemize}
-
-Versions are pinned exactly rather than floored. A graph-break count is a
-property of what TorchDynamo chooses to split on, so a different PyTorch
-release can report a different number, which a reviewer could reasonably read
-as a failed reproduction.
-
-\subsubsection{Data sets}
-
-None. Inputs are synthetic tensors at fixed shapes, seeded so that the two arms
-receive identical weights and identical inputs. The harness prints the input
-shape per arm and flags a mismatch rather than assuming one.
-
-\subsubsection{Models}
-
-The 27 rows of Table~\ref{tab:benchmark}. 21 are built offline from small
-configurations with random weights; graph breaks are structural, so this
-preserves the measured quantity. 6 need network access and
-\texttt{trust\_remote\_code}: \texttt{Florence-2},
-\texttt{MoLFormer-XL-both10pct} (revision pinned),
-\texttt{chronos-bolt-small}, \texttt{Qwen-Audio-Chat},
-\texttt{stella-en-400M-v5} and \texttt{moe-minicpm-x4-base}.
+\subsubsection{Data sets and models}
+No data set; inputs are synthetic tensors at fixed shapes, seeded so both arms
+receive identical weights and inputs, with the shape printed per arm and a
+mismatch flagged. The models are the 27 rows of Table~\ref{tab:benchmark}.
 
 \subsection{Installation}
 
 \begin{verbatim}
 git clone --recurse-submodules {{REPO_URL}}
 cd CGO_AE_GraphMend
-docker build -f artifact/Dockerfile.cpu \
-    -t graphmend-cpu .
-docker run --rm graphmend-cpu
+docker build -f artifact/Dockerfile.cpu -t gm .
+docker run --rm gm
 \end{verbatim}
 
-Or natively, with the dependencies above installed:
-
-\begin{verbatim}
-bash scripts/setup.sh
-bash scripts/run_quick.sh
-\end{verbatim}
+\noindent Or natively: \texttt{bash scripts/setup.sh}.
 
 \subsection{Experiment workflow}
 
-Two workflows are provided. The functional workflow answers whether GraphMend
-works, in 10--20 minutes on a CPU with no network:
+The functional workflow answers whether GraphMend works, on a CPU with no
+network, and exits non-zero on failure:
 
 \begin{verbatim}
-bash scripts/run_quick.sh
+bash scripts/run_quick.sh     # 10-20 minutes
 \end{verbatim}
 
-It runs the four rule-level graph-count suites, which exercise each rule on
-fixtures, and then four representative models: \texttt{t5-small}
+\noindent It runs the four rule-level suites, then \texttt{t5-small}
 (\textsc{[Defer]}), \texttt{Phi-4-mini-instruct} (\textsc{[Where]}, the
-Figure~\ref{fig:phi4} worked example), \texttt{longformer-base-4096} and
-\texttt{clap-htsat-fused}. The last two are expected \emph{not} to reach zero
-breaks; a run that fixed them would indicate a problem rather than a success.
-It prints \texttt{PASS}/\texttt{FAIL} per check and exits non-zero on failure.
+Figure~\ref{fig:phi4} example), \texttt{longformer-base-4096} and
+\texttt{clap-htsat-fused}. The last two are expected \emph{not} to reach zero;
+a run that fixed them would indicate a problem, not a success.
+\texttt{scripts/run\_full.sh} then runs every claim the hardware allows,
+skipping the GPU experiments where no CUDA device is visible.
 
-The full reproduction runs every claim the available hardware allows, skipping
-the two GPU experiments where no CUDA device is visible:
-
-\begin{verbatim}
-bash scripts/run_full.sh
-\end{verbatim}
-
-Two properties of the setup are easy to get wrong, and both produce a clean run
-that silently measures nothing. First, \texttt{graphmend\_claim\_imports} is off
-by default and all model code is imported third-party code, so without the
-opt-in both arms are identical. Second, the entry program must be compiled by
-Jac: GraphMend injects the deferred-side-effect hooks at the
-\texttt{torch.compile(...)} assignment site, so under plain CPython no hook is
-registered and every logger break survives. Both are documented prominently in
-the artifact README, and both are handled by the shipped scripts.
+One property of the setup is worth stating, because getting it wrong yields a
+clean run that silently measures nothing: GraphMend claims imported third-party
+code only under an opt-in that is off by default, and the entry program must be
+compiled by Jac rather than run under plain CPython. The shipped scripts handle
+both; the README documents them for reviewers writing their own.
 
 \subsection{Evaluation and expected results}
 
-Each claim has one script.
+Each claim has one script, named for it.
 
-\begin{itemize}
+{\small
+\begin{itemize}\itemsep0pt
   \item \texttt{run\_break\_analysis.sh} $\rightarrow$
-    Table~\ref{tab:benchmark}. Expect \textbf{21 models fully fixed, 3
-    partially fixed and 3 unfixed}, matching the table's model-level outcome,
-    with 25 of 27 rows matching its fix rate. \texttt{grounding-dino} reports
-    56\% against 58\%, a difference of one break out of seventeen.
-  \item \texttt{run\_correctness.sh} $\rightarrow$
-    Section~\ref{sec:eval}. Expect \texttt{output\_ok} to read \texttt{yes} on
-    every row, including the rows that fix nothing: FP32 outputs are
-    bit-identical and greedy-decoded token sequences agree.
-  \item \texttt{run\_fullgraph.sh} $\rightarrow$ Section~\ref{sec:serving}.
-    Expect \texttt{torch.compile(fullgraph=True)} to \emph{fail} on every
-    original model and \emph{succeed} on every transformed one. The check is
-    asymmetric by construction: both-pass or both-fail is a failure.
-  \item \texttt{run\_latency.sh} $\rightarrow$ Table~\ref{tab:benchmark},
-    Sections~\ref{sec:coldstart}--\ref{sec:steadystate}. Expect graph breaks to
-    reach zero and CUDA-graph launches per forward to collapse to one, and a
-    cold-start speedup well above unity.
-  \item \texttt{run\_throughput.sh} $\rightarrow$ Figure~\ref{fig:throughput}.
-    Expect a gain that tracks the number of CUDA-graph launches eliminated and
-    that shrinks as the batch grows.
+    Table~\ref{tab:benchmark}: \textbf{21 models fully fixed, 3 partially, 3
+    unfixed}, with 25 of 27 rows matching the fix rate.
+    \texttt{grounding-dino} reads 56\% against 58\%, one break in seventeen.
+  \item \texttt{run\_correctness.sh} $\rightarrow$ Section~\ref{sec:eval}:
+    \texttt{output\_ok} is \texttt{yes} on all 27 rows, including those that fix
+    nothing. FP32 outputs are bit-identical and greedy-decoded token sequences
+    agree.
+  \item \texttt{run\_fullgraph.sh} $\rightarrow$ Section~\ref{sec:serving}:
+    \texttt{fullgraph=True} fails on every original model and succeeds on every
+    transformed one. Both-pass or both-fail is a failure.
+  \item \texttt{run\_latency.sh} $\rightarrow$
+    Sections~\ref{sec:coldstart}--\ref{sec:steadystate}: breaks reach zero,
+    CUDA-graph launches per forward collapse to one, and cold start improves.
+  \item \texttt{run\_throughput.sh} $\rightarrow$
+    Figure~\ref{fig:throughput}: a gain that tracks the number of CUDA-graph
+    launches eliminated and shrinks as the batch grows.
   \item \texttt{run\_compiler\_overhead.sh} $\rightarrow$
-    Figure~\ref{fig:overhead}, Section~\ref{sec:overhead}. Expect a mean near
-    11.5\% on a cold compiler cache and near 1.1\% on a warm one.
+    Figure~\ref{fig:overhead}: mean overhead near 11.5\% cold and 1.1\% cached.
 \end{itemize}
+}
 
-\paragraph{Expected variation.} The deterministic results must match exactly:
-graph-break counts, CUDA-graph launch counts, output fingerprints, and
-full-graph capture outcomes. Timing results vary with the machine. Cold start
-is validated against a floor of $1.5\times$ on any CUDA device rather than
-against an expected value; steady state and throughput are reported without a
-validation threshold, because both move with the card and the batch size and a
-fixed bound would fail an honest run on different hardware.
+\paragraph{Expected variation.} Deterministic results must match exactly:
+break counts, CUDA-graph launch counts, output fingerprints and capture
+outcomes. Timings vary with the machine, so cold start is validated against a
+floor of $1.5\times$ on any CUDA device rather than an expected value, and
+steady state and throughput are reported without a threshold, since a fixed
+bound would fail an honest run on different hardware.
 
-\paragraph{On absolute break counts.} The CPU sweep runs in FP32, which is what
-the correctness claim concerns, and its absolute counts therefore differ from
-those in Table~\ref{tab:benchmark}, which were measured in half precision on a
-GPU: 122 breaks against 147, with 17 of 26 rows matching exactly. The largest
-group that differs is the BART family, whose overflow guard leads with
-\texttt{hidden\_states.dtype == torch.float16}. That conjunct is a static
-Python bool, so in FP32 Dynamo folds it to \texttt{False} and the
-data-dependent breaks behind it do not exist. Measured in half precision
-through \texttt{artifact/gpu/bench.py -{}-count}, those rows match the table
-exactly. The fix rate, which is what the \emph{Fixed(\%)} column reports, is
-unaffected.
+\paragraph{Absolute break counts.} The CPU sweep runs in FP32, which is what the
+correctness claim concerns, and totals 122 breaks against the 147 of
+Table~\ref{tab:benchmark}, which were measured in half precision; 17 of 26 rows
+match exactly. The largest group that differs is the BART family, whose
+overflow guard leads with \texttt{dtype == torch.float16}. That conjunct is a
+static bool, so in FP32 Dynamo folds it away and the data-dependent breaks
+behind it do not exist. Measured in half precision via
+\texttt{gpu/bench.py -{}-count}, those rows match exactly. The fix rate, which
+is what the \emph{Fixed(\%)} column reports, is unaffected.
 
 \subsection{Experiment customization}
 
-Individual rows run by name, for example
-\texttt{bash scripts/run\_break\_analysis.sh t5-small biogpt}, and
-\texttt{GM\_GPU\_MODELS} selects a subset for the GPU scripts. Individual rules
-can be ablated with \texttt{[run] graphmend\_disable}, which takes a
-comma-separated list of \texttt{trap}, \texttt{where} and \texttt{defer};
-setting \texttt{graphmend = false} disables all three.
-
-To point GraphMend at a model that is not in the suite, add a \texttt{\_build()}
-returning \texttt{(model, inputs)} and a registry entry naming the modules
-GraphMend should transform, then run the analyzer to see the detected breaks
-and their causes:
-
-\begin{verbatim}
-python -m paper_eval.run_why <model_key> on
-\end{verbatim}
-
-This prints each surviving break with its reason and source location, which is
-what distinguishes a correctly unfixed row from a defect. Note that a model's
-breaks frequently live in shared \texttt{transformers} modules rather than in
-its own package, so a transform scope naming only the model package will
-silently miss them.
+Rows run by name (\texttt{run\_break\_analysis.sh t5-small biogpt}), and
+\texttt{GM\_GPU\_MODELS} selects a subset for the GPU scripts. Rules are ablated
+with \texttt{graphmend\_disable}, taking any of \texttt{trap}, \texttt{where},
+\texttt{defer}. To target a model outside the suite, add a \texttt{\_build()}
+returning \texttt{(model, inputs)} and a registry entry naming the modules to
+transform, then inspect the detected breaks with
+\texttt{python -m paper\_eval.run\_why <model> on}, which prints each surviving
+break with its cause and source location. Note that a model's breaks often live
+in shared \texttt{transformers} modules rather than its own package, so a scope
+naming only the model package will miss them.
 
 \subsection{Notes}
 
 Enabling the code path under test matters as much as enabling GraphMend.
-\texttt{Phi-4-mini-instruct} only takes the LongRoPE branch when
+\texttt{Phi-4-mini-instruct} takes the LongRoPE branch only when
 \texttt{rope\_scaling.type} is \texttt{"longrope"}; \texttt{clap} needs
 \texttt{enable\_fusion}; \texttt{longformer} needs a sequence length that is not
 a multiple of the attention window; and \texttt{Florence-2}'s guard is dead code
-in FP32 and must be measured in half precision. With the default configuration
-each of those rows would pass vacuously.
-
-\texttt{stella-en-400M-v5} reproduces its 0\% row only on CUDA with xformers
-installed, because its breaks live behind the unpadding path. The CPU fallback
-measures a different, smaller break set.
+in FP32. \texttt{stella-en-400M-v5} reproduces its 0\% row only on CUDA with
+xformers, because its breaks live behind the unpadding path.
 
 \subsection{Methodology}
 
-Submission, reviewing and badging methodology:
-
-\begin{itemize}
+\begin{itemize}\itemsep0pt
   \item \url{https://www.acm.org/publications/policies/artifact-review-badging}
   \item \url{http://cTuning.org/ae/submission-20201122.html}
   \item \url{http://cTuning.org/ae/reviewing-20201122.html}
