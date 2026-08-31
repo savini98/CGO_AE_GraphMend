@@ -347,13 +347,22 @@ It re-derives from the authors' own traces exactly.
 [`gpu/from_trace.py`](gpu/from_trace.py) reads a profiler trace pair and reports
 cold, warm and CUDA-graph launches, needing no GPU and no model download:
 
-| model | cold, published | re-derived | warm, published | re-derived | launches |
+| model | Table 2 cold | re-derived | Table 2 steady | re-derived | launches |
 |---|---|---|---|---|---|
-| MoLFormer-XL | 25x | **24.71x** | 1.03x | 1.014x | 50 -> 1 |
-| bart-large-cnn | 21x | **21.07x** | 1.11x | 1.121x | 30 -> 1 |
-| Florence-2-large | 21x | **20.95x** | 1.13x | 1.127x | 30 -> 1 |
-| opus-mt-fr-en | 13x | **13.16x** | 1.10x | 1.102x | 17 -> 1 |
-| t5-small | 3.5x | **3.49x** | 0.99x | 0.996x | 4 -> 1 |
+| MoLFormer-XL | 24.71x | **24.71x** | 1.13x | 1.014x | 50 -> 1 |
+| bart-large-cnn | 21.07x | **21.07x** | 1.13x | 1.121x | 30 -> 1 |
+| Florence-2-large | 20.95x | **20.95x** | 1.19x | 1.127x | 30 -> 1 |
+| opus-mt-fr-en | 13.16x | **13.16x** | 1.10x | 1.102x | 17 -> 1 |
+| t5-small | 3.49x | **3.49x** | 1.08x | 0.996x | 4 -> 1 |
+
+**Read the two halves of this table differently.** The cold column is Table 2's
+own value and the re-derivation matches it to two decimals. The steady column
+is Table 2's own value too, and it does **not** re-derive from these traces:
+the trace-derived warm figure is systematically lower, by about 0.10 on most
+rows. That offset is documented rather than reconciled here, because resolving
+it is an author task on the paper side, not something the artifact can settle.
+Section 5.3's statement that "every steady-state result in Table 2 is at least
+1.05x faster" does not hold for the trace-derived values either.
 
 Re-running fresh on an RTX 3090 reproduces it too: MoLFormer-XL at batch 837
 measures **20.57x** cold against a published 24.71x, warm **1.06x**, breaks
