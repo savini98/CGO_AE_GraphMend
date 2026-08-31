@@ -496,6 +496,29 @@ def main():
             print(f"  cold, no compile  off={off['cold_ms']:9.1f}ms "
                   f"on={on['cold_ms']:9.1f}ms  "
                   f"speedup={off['cold_ms']/on['cold_ms']:.2f}x   (conservative)")
+            # TIME TO STEADY STATE. The two metrics above both anchor on the
+            # first region window, which silently undercounts whenever
+            # compilation does not finish inside it. On a slower card it often
+            # does not: an RTX 3090 running MoLFormer at batch 1136 spends
+            # 4108 ms in window 1 and a further 5627 ms in window 2 before
+            # reaching a 163 ms steady state, so window 1 alone reports 4.68x
+            # where the full cold cost is 8.12x. Summing every window above the
+            # steady median is definition-independent and is what a user
+            # actually waits through.
+            def _to_steady(ws):
+                if len(ws) < 3:
+                    return None
+                steady = statistics.median(ws[2:])
+                total = 0.0
+                for w in ws:
+                    if w <= steady * 1.5:
+                        break
+                    total += w
+                return total or None
+            so, sn = _to_steady(off['all_windows_ms']), _to_steady(on['all_windows_ms'])
+            if so and sn:
+                print(f"  cold, to steady   off={so:9.1f}ms on={sn:9.1f}ms  "
+                      f"speedup={so/sn:.2f}x   (all pre-steady windows)")
             print(f"    compile inside  off={off['cold_compile_ms']:9.1f}ms "
                   f"on={on['cold_compile_ms']:9.1f}ms")
             print(f"  warm (median)     off={off['warm_ms']:9.3f}ms "

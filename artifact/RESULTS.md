@@ -543,6 +543,33 @@ share of the total, while on a 3090 the same batch takes 33 ms because it is
 compute-bound and the same saved overhead is a smaller share. A warm number is
 therefore only meaningful beside the GPU it was taken on.
 
+### Cold start: run 1 alone undercounts on a slower card
+
+`profiling_utils.py` takes `cold = run_ms[0]`, the first region window. That is
+correct only if compilation finishes inside that window, and on a slower GPU it
+does not. Compare the window sequences for MoLFormer-XL at batch 1136:
+
+| | run 1 | run 2 | run 3 onward |
+|---|---|---|---|
+| reference trace, original | 513.0 | 41.0 | 41.7, 42.2, 42.3 (steady) |
+| RTX 3090, original | 4108.5 | **5627.3** | 172.8, 162.9, 162.7 (steady) |
+
+On the reference card run 2 is already steady. On the 3090 run 2 is larger than
+run 1: compilation spans both windows, so anchoring on run 1 charges the
+original arm for less than half of what it actually costs.
+
+Summing every window above the steady median is definition-independent and is
+what a user actually waits through. It changes the answer where the spill is
+large and leaves it alone where it is not:
+
+| model | run 1 only | to steady state | reference |
+|---|---|---|---|
+| MoLFormer-XL @1136 | 4.68x | **8.12x** | 9.91x |
+| opus-mt-fr-en @1252 | 12.77x | **12.68x** | 13x |
+
+`gpu/bench.py` now reports `cold, to steady` beside the other two definitions,
+and prints every window so the choice is auditable rather than assumed.
+
 **Run 2 is still warming up and should not be treated as steady state.** The
 region windows for the original arm above run
 `10558.5, 2379.5, 33.65, 33.07, 32.83, 32.80, 31.91`: the second is a further
