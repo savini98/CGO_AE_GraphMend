@@ -40,8 +40,10 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 
 # Table 2: (breaks, fix rate %). Keys are this artifact's model names.
 TABLE2 = {
@@ -80,11 +82,25 @@ REF_BUILD = {
 # moe-minicpm 16 against 15.
 NO_REFERENCE = {"clap-htsat-fused", "moe-minicpm-x4-base"}
 
+# chronos-bolt-small reproduces Table 2's 100% FIX RATE (4 -> 0) but not its
+# break COUNT of 6. The two missing breaks are logger calls in the chronos
+# pipeline WRAPPER rather than in the model. [Defer] activates through a
+# forward pre-hook that GraphMend injects at a `torch.compile(...)` assignment
+# site, and that hook is only registered when the compiled object is an
+# nn.Module. Tracing `pipeline.predict` instead does surface all 6 breaks, but
+# then the callable is a lambda, no hook is registered, the rewrite is inert,
+# and the row reads 6 -> 6 with nothing fixed. So the count and the fix cannot
+# both be reproduced here, and the fix rate is the half Table 2 claims.
+COUNT_ONLY_DEVIATION = {"chronos-bolt-small"}
+
 NETWORK_ROWS = {"MoLFormer-XL-both10pct", "Florence-2", "Qwen-Audio-Chat",
                 "chronos-bolt-small", "moe-minicpm-x4-base",
                 "stella-en-400M-v5"}
 # Needs CUDA plus xformers; the CPU fallback measures a different break set.
 GPU_ONLY_ROWS = {"stella-en-400M-v5"}
+
+
+_JAC_TOML = "[run]\ngraphmend = true\ngraphmend_claim_imports = {on}\n"
 
 
 def _jac_dir():
@@ -103,36 +119,12 @@ def run_cpu(keys, jac):
                        capture_output=True, text=True, cwd=jac, env=env)
     out = {}
     for line in p.stdout.splitlines():
-        m = re.match(r"^(\S+)\s+(\d+)\s+(\d+)\s+\d+%", line)
+        # run_eval prints: key before after fixed% output_ok input
+        m = re.match(r"^(\S+)\s+(\d+)\s+(\d+)\s+\d+%\s+(\S+)", line)
         if m and m.group(1) in TABLE2:
-            out[m.group(1)] = (int(m.group(2)), int(m.group(3)))
+            out[m.group(1)] = (int(m.group(2)), int(m.group(3)),
+                               m.group(4) == "yes")
     return out
-
-
-def run_chronos(jac):
-    """chronos-bolt-small, counted over `pipeline.predict`.
-
-    Its breaks are logger calls inside the pipeline wrapper, not the inner
-    model, so a bare forward sees 4 of the 6. The reference counts the same way
-    (`print_graph_breaks` traces `pipeline.predict`), and doing so here gives 6,
-    which is Table 2's count.
-    """
-    code = (
-        "import warnings,torch;warnings.filterwarnings('ignore')\n"
-        "import torch._dynamo as dynamo\n"
-        "from chronos import BaseChronosPipeline\n"
-        "p=BaseChronosPipeline.from_pretrained('amazon/chronos-bolt-small',"
-        "device_map='cpu',torch_dtype=torch.float32)\n"
-        "e=dynamo.explain(lambda c:p.predict(inputs=c,prediction_length=8))"
-        "(torch.randn(1,128))\n"
-        "print('CHRONOS',e.graph_break_count)\n")
-    env = dict(os.environ, PYTHONPATH=jac, PYTHONUNBUFFERED="1")
-    r = subprocess.run([sys.executable, "-c", code], capture_output=True,
-                       text=True, cwd=jac, env=env)
-    for line in r.stdout.splitlines():
-        if line.startswith("CHRONOS "):
-            return {"chronos-bolt-small": (int(line.split()[1]), 0)}
-    return {}
 
 
 def run_gpu(keys, jac):
@@ -154,7 +146,9 @@ def run_gpu(keys, jac):
         inv = {v: k for k, v in REF_BUILD.items()}
         for bench_key, r in data.items():
             if bench_key in inv and not r.get("off", {}).get("error"):
-                out[inv[bench_key]] = (r["off"]["breaks"], r["on"]["breaks"])
+                ho, hn = r["off"].get("out_hash"), r["on"].get("out_hash")
+                out[inv[bench_key]] = (r["off"]["breaks"], r["on"]["breaks"],
+                                       bool(ho) and ho == hn)
         break
     return out
 
@@ -188,8 +182,7 @@ def main():
         skip |= GPU_ONLY_ROWS
 
     ref_keys = [k for k in REF_BUILD if k not in skip]
-    cpu_keys = [k for k in TABLE2 if k not in skip and k not in REF_BUILD
-                and k != "chronos-bolt-small"]
+    cpu_keys = [k for k in TABLE2 if k not in skip and k not in REF_BUILD]
 
     print(f"routing {len(cpu_keys)} row(s) to the small-config harness and "
           f"{len(ref_keys)} to the reference-fidelity build")
@@ -198,48 +191,71 @@ def main():
     got = {}
     got.update(run_cpu(cpu_keys, jac))
     got.update({k: v for k, v in run_gpu(ref_keys, jac).items()})
-    if "chronos-bolt-small" not in skip:
-        got.update(run_chronos(jac))
 
-    print(f"{'model':32s} {'before':>7s} {'after':>6s} {'fixed':>6s} "
-          f"{'paper':>7s} {'paper':>6s}  via     verdict")
-    print("-" * 88)
-    bad = tot_b = tot_a = p_tot_b = 0
+    print(f"{'model':30s} {'before':>6s} {'after':>5s} {'fixed':>6s} "
+          f"{'paper':>6s} {'output':>7s}  via      verdict")
+    print("-" * 92)
+    bad = bad_out = bad_rate = tot_b = tot_a = p_tot_b = 0
     for key in sorted(TABLE2):
         pb, pr = TABLE2[key]
-        via = ("chronos" if key == "chronos-bolt-small"
-               else "ref" if key in REF_BUILD else "small")
+        via = "ref" if key in REF_BUILD else "small"
         if key in skip:
-            print(f"{key:32s} {'-':>7s} {'-':>6s} {'-':>6s} "
-                  f"{pb:7d} {pr:5d}%  {via:6s}  SKIP")
+            print(f"{key:30s} {'-':>6s} {'-':>5s} {'-':>6s} "
+                  f"{pb:6d} {'-':>7s}  {via:7s}  SKIP")
             continue
         if key not in got:
-            print(f"{key:32s} {'ERR':>7s} {'-':>6s} {'-':>6s} "
-                  f"{pb:7d} {pr:5d}%  {via:6s}  FAIL (no result)")
+            print(f"{key:30s} {'ERR':>6s} {'-':>5s} {'-':>6s} "
+                  f"{pb:6d} {'-':>7s}  {via:7s}  FAIL (no result)")
             bad += 1
             continue
-        b, a = got[key]
+        b, a, okout = got[key]
         rate = round(100 * (b - a) / b) if b else 0
         tot_b += b
         tot_a += a
         p_tot_b += pb
-        ok = (b == pb)
-        if not ok and key not in NO_REFERENCE:
+        # BOTH halves of the row must match, not just the count found.
+        # Checking only `b == pb` passes a row where GraphMend eliminated
+        # nothing, which is the opposite of the claim: chronos-bolt-small read
+        # 6 -> 6 (0% fixed) against a published 100% and still showed PASS.
+        rate_ok = (rate == pr) or abs(rate - pr) <= 1   # 1 point for rounding
+        ok = (b == pb) and rate_ok
+        if b == pb and not rate_ok:
+            bad_rate += 1
+        # Correctness is part of the claim, not a footnote: a row that
+        # eliminates breaks but changes the output has not been fixed.
+        if okout is False:
+            ok = False
+            bad_out += 1
+        if not ok and key not in NO_REFERENCE and not (
+                key in COUNT_ONLY_DEVIATION and rate_ok):
             bad += 1
-        print(f"{key:32s} {b:7d} {a:6d} {rate:5d}% "
-              f"{pb:7d} {pr:5d}%  {via:6s}  "
-              f"{'PASS' if ok else ('NO REFERENCE' if key in NO_REFERENCE else 'COUNT DIFFERS')}")
+        oc = "same" if okout else ("DIFFERS" if okout is False else "n/a")
+        why = ("COUNT DIFFERS" if b != pb else
+               "NOT FIXED" if not rate_ok else "")
+        print(f"{key:30s} {b:6d} {a:5d} {rate:5d}% "
+              f"{pb:6d} {oc:>7s}  {via:7s}  "
+              f"{'PASS' if ok else ('NO REFERENCE' if key in NO_REFERENCE else ('RATE OK, COUNT DIFFERS' if key in COUNT_ONLY_DEVIATION and rate_ok else why))}")
 
-    print("-" * 88)
-    print(f"{'TOTAL (measured rows)':32s} {tot_b:7d} {tot_a:6d} "
+    print("-" * 92)
+    print(f"{'TOTAL (measured rows)':30s} {tot_b:6d} {tot_a:5d} "
           f"{round(100 * (tot_b - tot_a) / tot_b) if tot_b else 0:5d}% "
-          f"{p_tot_b:7d}")
+          f"{p_tot_b:6d}")
     print()
+    if bad_rate:
+        print(f"{bad_rate} row(s) found the right number of breaks but did not "
+              f"eliminate the published fraction of them. That is a failure of "
+              f"the claim, not of the count.")
+    if bad_out:
+        print(f"{bad_out} row(s) CHANGED THEIR OUTPUT. This is the claim's "
+              f"load-bearing half: eliminating a break while altering the "
+              f"result is not a fix.")
     if bad:
         print(f"{bad} row(s) do not match Table 2's break count. "
               f"See the deviations section of artifact/RESULTS.md.")
-    else:
-        print("Every measured row reproduces Table 2's break count.")
+    if not bad and not bad_out:
+        print(f"GraphMend eliminated {tot_b - tot_a} of {tot_b} graph breaks "
+              f"across the measured rows, and every row that carries an output "
+              f"comparison produced an IDENTICAL result in both arms.")
     return 1 if bad else 0
 
 

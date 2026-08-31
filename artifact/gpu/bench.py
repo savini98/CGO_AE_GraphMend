@@ -415,9 +415,30 @@ def arm():
         c = torch.compile(model,
                           backend=lambda gm, ex: (graphs.append(gm), gm.forward)[1])
         with torch.no_grad():
-            c(**inputs)
+            out = c(**inputs)
         res["graphs"] = len(graphs)
         res["breaks"] = max(0, len(graphs) - 1)
+        # Output fingerprint, so the reference rows can carry the same
+        # correctness evidence as the small-config rows rather than only a
+        # break count. Both arms build from the same seed and the same
+        # checkpoint, so a difference here is the transform changing behaviour,
+        # which is exactly the thing the paper claims does not happen.
+        import hashlib
+        t = out if isinstance(out, torch.Tensor) else None
+        for attr in ("logits", "last_hidden_state"):
+            if hasattr(out, attr):
+                t = getattr(out, attr)
+                break
+        if t is None and isinstance(out, (tuple, list)) and out:
+            t = out[0]
+        if t is None and hasattr(out, "values"):
+            for v in out.values():
+                if isinstance(v, torch.Tensor):
+                    t = v
+                    break
+        res["out_hash"] = (
+            hashlib.sha256(t.detach().float().cpu().numpy().tobytes()).hexdigest()[:16]
+            if isinstance(t, torch.Tensor) else None)
     else:
         cmode = os.environ.get("GM_BENCH10_MODE", "reduce-overhead")
         runs = int(os.environ.get("GM_BENCH10_RUNS", "8"))
