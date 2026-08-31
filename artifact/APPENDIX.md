@@ -1,24 +1,10 @@
 <!--
-Artifact Appendix draft, CGO 2027 Artifact Evaluation.
+Artifact Appendix, CGO 2027 Artifact Evaluation. At most 2 pages, placed before
+the References, ctuning AE appendix template (\appendix + the
+artifact-evaluation LaTeX package).
 
-Formatting requirements this draft is written against:
-  - at most 2 pages
-  - placed BEFORE the References
-  - ctuning AE appendix template (\appendix + the artifact-evaluation LaTeX
-    package), section order as below
-  - single-blind review, at least two reviewers per artifact
-  - R1 submission deadline Tue 1 Sep 2026 AoE, https://cgo27ae.hotcrp.com/
-
-Placeholders that MUST be filled before submission are written as {{LIKE_THIS}}.
-There are four of them: the archival DOI, the public repository URL, the commit
-hash, and the paper's own title/author line if the appendix repeats it.
-
-Length note: about 1540 words of body text, which is close to two two-column
-pages and may run slightly over once the check-list bullets and the two tables
-are typeset. Trim in this order if needed: (1) the A.2 check-list entries that
-repeat A.3, (2) the A.8 Notes examples, keeping at least the Phi-4 LongRoPE one,
-(3) the A.7 customization detail. Do not trim A.6, which is the section a
-reviewer actually works from, or the PyTorch version deviation in A.3.3.
+Placeholders to fill before submission, written as {{LIKE_THIS}}: the archival
+DOI, the public repository URL, and the commit hash.
 -->
 
 # Artifact Appendix
@@ -89,7 +75,7 @@ out of scope.
   consecutive `Torch-Compiled Region` markers; CUDA-graph launches per forward;
   end-to-end throughput.
 - **Output:** a table per model, plus a total. Reference output is in
-  `artifact/README.md` and `artifact/RESULTS.md`.
+  `artifact/README.md`.
 - **Experiments:** 4 rule-level graph-count suites (18 tests); 21 offline model
   rows; 6 network model rows; per-break cause reporting; full-graph capture per
   arm; re-derivation of the published latency numbers from 48 shipped profiler
@@ -206,16 +192,19 @@ From the repository's `jac/` directory with `PYTHONPATH=$PWD`:
 | Output bit-identical in FP32 | same | `output_ok` = `yes` on all rows |
 | Figure 3 worked example (`[Where]`) | `python -m paper_eval.run_eval Phi-4-mini-instruct` | `5 -> 0`, 100% |
 | Break-cause attribution | `python -m paper_eval.run_why <model> on` | per-break reason and location |
+| Full-graph capture (Section 5.6) | `python -m paper_eval.run_fullgraph` | `off failed / on ok` on every row |
 
-**All 27 rows are measured and reproduce their Table 2 behaviour; 26 match its
-fix rate to the percentage point.** The 21 offline rows total 89 breaks to 19
-(78%). `grounding-dino` and `grounding-dino-base` measure 56% where Table 2
-reads 58% (16 breaks to 7); the residue is three sites in the paper's own
-out-of-scope categories, and the two-point difference is the small-config
-deviation expressed as a rate, since Table 2 counts a full pretrained model
-where this harness builds a small config. `stella-en-400M-v5` reproduces its 0% row only on CUDA with xformers,
-because its breaks live behind unpadding; the CPU fallback measures a
-different, smaller break set and is not the Table 2 row.
+**All 27 rows are measured; 25 match Table 2's fix rate to the percentage
+point.** The 21 offline rows total 89 breaks to 19 (78%). `grounding-dino` and
+`grounding-dino-base` measure 56% where Table 2 reads 58% (16 breaks to 7); the
+residue is three sites in the paper's own out-of-scope categories, and the
+two-point difference is the small-config deviation expressed as a rate, since
+Table 2 counts a full pretrained model where this harness builds a small
+config. Eight rows read a lower absolute break count than Table 2 for the same
+reason; the artifact guide lists Table 2's count beside every measured count.
+`stella-en-400M-v5` reproduces its 0% row only on CUDA with xformers, because
+its breaks live behind unpadding; the CPU fallback measures a different,
+smaller break set and is not the Table 2 row.
 
 Four rows are expected **not** to reach zero and reproduce exactly for that
 reason: longformer at 40%, and clap-htsat-fused, moe-minicpm-x4-base and
@@ -228,21 +217,19 @@ All three rules have real-model demonstrations: `[Defer]` on 17 rows,
 `[Where]` on Phi-4-mini-instruct, Florence-2 and Qwen-Audio-Chat, and `[Trap]`
 on MoLFormer-XL (5 to 0) and grounding-dino (16 to 7).
 
-C8 and C9 re-derive from the shipped profiler traces with no GPU:
-`python artifact/gpu/from_trace.py --dir artifact/traces/3090` reproduces the
-Table 2 cold value to two decimals on **22 of the 24** trace pairs, and the
-steady-state and CUDA-graph launch values alongside it. Two rows differ,
-`biogpt` (1.63x against a published 2.63x) and `Phi-4-mini` (2.60x against
-3.60x), each by exactly 1.00.
-
-Re-measured live on an RTX 3090, break counts and launch counts match exactly
-(MoLFormer-XL 5 to 0 breaks, 50 to 1 launches) and cold start reproduces
-(20.57x against a published 24.71x). C10 throughput measures +1.36%, -1.40% and
-+0.17% on t5-small, MoLFormer-XL and Phi-4-mini; near-zero is expected for
-these three, since the paper's 15% maximum is Florence-2-large, whose forward
-pass is a large share of its inference (paper 5.4). Latency numbers depend on
-the GPU, so direction and magnitude are the thing to check, not equality. See
-the GPU section of `artifact/RESULTS.md`.
+The latency results of Sections 5.2 to 5.4 are supporting evidence rather than
+claims a reviewer must reproduce: they follow from break elimination and they
+require the specific NVIDIA hardware of Section 5. They are covered two ways.
+The profiler traces the published numbers were read from are shipped here, so
+`python artifact/gpu/from_trace.py --dir artifact/traces/3090` re-derives Table
+2's cold-start column to two decimals on **22 of the 24** trace pairs, and the
+CUDA-graph launch counts exactly, with **no GPU and no model download**. For
+reviewers with an NVIDIA GPU, `artifact/gpu/run_reproducible.sh` re-measures on
+device with fixed expected values and a real exit status; on an RTX 3090 break
+counts and launch counts match exactly (MoLFormer-XL 5 to 0 breaks, 50 to 1
+launches) and cold start reproduces at 20.57x against a published 24.71x.
+Latency depends on the GPU, so direction and magnitude are what to check rather
+than equality.
 
 ## A.7 Experiment customization
 

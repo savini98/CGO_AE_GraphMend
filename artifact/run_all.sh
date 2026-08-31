@@ -88,9 +88,9 @@ if [ "$TORCH_V" = "MISSING" ] || [ "$TRANSFORMERS_V" = "MISSING" ]; then
     exit 2
 fi
 
-# The measured results in RESULTS.md were taken on exactly these two versions.
-# Anything else may still work and is not blocked, but the numbers below are
-# only claimed for this pair.
+# The measured results in artifact/README.md were taken on exactly these two
+# versions. Anything else may still work and is not blocked, but the numbers
+# below are only claimed for this pair.
 #
 # The local version segment is stripped before comparing. A wheel from the
 # PyTorch index reports its build in that segment -- "2.12.1+cpu", "2.12.1+cu126"
@@ -166,10 +166,10 @@ fi
 # subprocesses, GraphMend off then on, and compares a SHA-256 fingerprint of
 # the output tensor between the two.
 #
-# The expected values are the measured values recorded in RESULTS.md. Two of
-# the five are deliberately NOT clean sweeps: longformer is 40% and clap is 0%
-# in the paper's own Table 2, because what survives is the paper's declared
-# out-of-scope category. A run that "fixed" them would be the surprise.
+# The expected values are the measured values recorded in artifact/README.md.
+# Two of the five are deliberately NOT clean sweeps: longformer is 40% and clap
+# is 0% in the paper's own Table 2, because what survives is the paper's
+# declared out-of-scope category. A run that "fixed" them would be the surprise.
 # ---------------------------------------------------------------------------
 rule
 echo "STEP 2  model rows (GraphMend off vs on, break counts and output hash)"

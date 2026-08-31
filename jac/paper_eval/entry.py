@@ -145,7 +145,7 @@ for v in inputs.values():
         in_shape = list(v.shape)
         break
 
-# Which quantity `out_hash` covers, so RESULTS.md can say how many rows
+# Which quantity `out_hash` covers, so the results table can say how many rows
 # compare decoded token sequences rather than asserting it. For a generate row
 # the returned tensor IS the token ids, so the hash is over the sequence.
 compared = "tokens" if spec.get("call") == "generate" else "logits"

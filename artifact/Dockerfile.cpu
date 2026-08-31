@@ -24,7 +24,7 @@
 #     --entrypoint bash graphmend-cpu \
 #     -lc 'cd /opt/jaseci/jac && python -m paper_eval.run_eval Florence-2'
 #
-# BUILT AND VERIFIED. Every break-elimination number in artifact/RESULTS.md was
+# BUILT AND VERIFIED. Every break-elimination number in artifact/README.md was
 # measured inside this image, so `docker run` here executes the same binary that
 # produced them. A clean build from a fresh clone of the public repository runs
 # `18 passed, 0 skipped` on the rule suites and five PASS model rows, exit 0.
@@ -46,7 +46,7 @@ FROM python:3.13-slim
 # different numbers and read that as a failed reproduction.
 #
 # 2.12.1 is the paper's torch 2.12, and is the version every row in
-# artifact/RESULTS.md was measured on.
+# artifact/README.md was measured on.
 ARG TORCH_VERSION=2.12.1
 # torchvision is not optional. The grounding-dino rows call
 # `torchvision.ops.nms`, and a torchvision built against a different torch

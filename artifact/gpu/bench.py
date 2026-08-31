@@ -349,7 +349,8 @@ def arm():
         # scheduling that GraphMend does not touch. By Amdahl the gain is
         # bounded by the forward pass's share of inference, which is why the
         # paper's own numbers are far smaller than its steady-state ones and
-        # why most models here land near zero. See the C10 note in RESULTS.md.
+        # why most models here land near zero. See the latency section of
+        # artifact/README.md.
         if os.environ.get("GM_BENCH10_THROUGHPUT"):
             import time as _t
             gen = hasattr(model, "generate") and key != "MoLFormer-XL-both10pct"
