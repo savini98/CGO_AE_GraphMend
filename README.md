@@ -55,7 +55,8 @@ Natively, without Docker:
 
 ```bash
 bash scripts/setup.sh        # submodule + patch + typeshed stubs
-bash artifact/run_all.sh     # 4 rule suites + 5 models
+bash scripts/run_quick.sh    # functional check, ~10-20 min
+bash scripts/run_full.sh     # full reproduction
 ```
 
 **Give Docker at least 12 GB of memory.** `Phi-4-mini-instruct` peaks near
@@ -125,9 +126,8 @@ and no gate where any fixed threshold would fail honest hardware.
 ## What this artifact does not cover
 
 - The 195-model survey of §1 and §5, which selected the benchmark suite.
-- §5.7, GraphMend's own compilation overhead.
-- Table 2's steady-state and throughput columns. C4 covers the serving
-  requirement attributable to GraphMend.
+- Table 2's steady-state and throughput magnitudes. Both are measured on your
+  hardware; neither carries a validation threshold.
 - Absolute break counts on 8 of the 27 rows read lower than Table 2's, because
   the harness builds small random-weight configs rather than full pretrained
   models. Fix rate, which is what Table 2's `Fixed(%)` column reports, is

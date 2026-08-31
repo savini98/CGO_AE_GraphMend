@@ -37,8 +37,7 @@ rather than gating on them.
 
 The 195-model survey of Section 5 selected the benchmark suite; this artifact
 supports the results measured on the resulting 27 models rather than re-running
-that survey. Section 5.7's compilation-overhead characterization is likewise
-out of scope.
+that survey.
 
 ## A.2 Artifact check-list (meta-information)
 
@@ -82,8 +81,11 @@ out of scope.
   rows; 6 network model rows; per-break cause reporting; full-graph capture per
   arm; and, on a GPU, measurement of break counts, CUDA-graph launches, cold
   start, steady state and throughput.
-- **Disk:** the built CPU image is 1.37 GB; allow roughly 5 GB with the build
-  cache. The 6 network rows add a few GB of Hub downloads on top.
+- **Disk:** a clone with the submodule is 135 MB (46 MB of it the toolchain,
+  88 MB the git history); the archival tarball is 10 MB and 47 MB unpacked. The
+  Jac compiler cache reaches 73 MB after a warm run. The built CPU image is
+  1.37 GB; allow roughly 5 GB with the build cache. The 6 network rows add a
+  few GB of Hub downloads on top.
 - **Time to prepare workflow:** about 5 minutes for the container build on a
   20-core machine, most of it the PyTorch wheel download and the build-time
   compiler cache warm.
