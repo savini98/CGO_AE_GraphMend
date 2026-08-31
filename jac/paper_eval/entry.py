@@ -66,6 +66,40 @@ if _state:
     else:
         torch.save(model.state_dict(), _state)
 
+# Paper 5.6: full-graph capture for serving frameworks. vLLM requires model
+# code to be capturable via `torch.compile(fullgraph=True)`, and SGLang's
+# piecewise CUDA graph relies on the same capture; a single graph break fails
+# the requirement. `backend="eager"` isolates Dynamo's capture from backend
+# compilation, so this measures graph-break elimination and nothing else. It
+# needs no GPU and is deterministic: the off arm must fail and the on arm must
+# succeed.
+#
+# Restricted to models whose breaks live on the forward path. For the handful
+# whose breaks are on the generation path, `fullgraph=True` over `generate()`
+# fails in BOTH arms on the Python-level decode loop, which says nothing about
+# GraphMend, so those are reported as skipped rather than as a false result.
+if os.environ.get("GM_CHECK") == "fullgraph":
+    if spec.get("call") == "generate":
+        print("GMRESULT " + json.dumps({
+            "key": key, "fullgraph": "skipped",
+            "why": "breaks are on the generation path; fullgraph over "
+                   "generate() fails in both arms on the decode loop",
+            "error": None}))
+        raise SystemExit(0)
+    torch._dynamo.reset()
+    _fg = torch.compile(model, backend="eager", fullgraph=True, dynamic=False)
+    _ok, _why = True, None
+    try:
+        with torch.no_grad():
+            _fg(**inputs)
+    except Exception as _exc:
+        _ok = False
+        _why = f"{type(_exc).__name__}: {str(_exc).strip().splitlines()[0][:160]}"
+    print("GMRESULT " + json.dumps({
+        "key": key, "fullgraph": "ok" if _ok else "failed",
+        "why": _why, "error": None}))
+    raise SystemExit(0)
+
 graphs = []
 
 

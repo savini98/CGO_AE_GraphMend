@@ -341,6 +341,48 @@ def arm():
         else:
             c = torch.compile(model, backend="inductor", mode=cmode,
                               fullgraph=False)
+        # C10, throughput (paper 5.4). The paper's setup is "Text models
+        # generate 100 output tokens with greedy decoding", and throughput is
+        # the percentage increase in inference throughput, tokens per second
+        # for generative models and samples per second for encoders. That is
+        # END TO END, so it includes the decode loop, tokenisation and CPU-side
+        # scheduling that GraphMend does not touch. By Amdahl the gain is
+        # bounded by the forward pass's share of inference, which is why the
+        # paper's own numbers are far smaller than its steady-state ones and
+        # why most models here land near zero. See the C10 note in RESULTS.md.
+        if os.environ.get("GM_BENCH10_THROUGHPUT"):
+            import time as _t
+            gen = hasattr(model, "generate") and key != "MoLFormer-XL-both10pct"
+            n_tok = int(os.environ.get("GM_BENCH10_GEN_TOKENS", "100"))
+            reps = int(os.environ.get("GM_BENCH10_TPUT_REPS", "3"))
+
+            def _once():
+                with torch.inference_mode():
+                    if gen:
+                        return c.generate(**inputs, max_new_tokens=n_tok,
+                                          do_sample=False, num_beams=1)
+                    return c(**inputs)
+
+            _once()          # compile and capture before timing anything
+            sync()
+            best = None
+            for _ in range(reps):
+                t0 = _t.perf_counter()
+                _once()
+                sync()
+                dt = _t.perf_counter() - t0
+                best = dt if best is None else min(best, dt)
+            batch = int(next(iter(inputs.values())).shape[0])
+            units = (batch * n_tok) if gen else batch
+            print("GMBENCH10 " + json.dumps({
+                "key": key, "throughput": units / best,
+                "unit": "tokens/s" if gen else "samples/s",
+                "seconds": best, "batch": batch,
+                "in_shape": list(next(iter(inputs.values())).shape),
+                "dtype": str(next(model.parameters()).dtype).replace("torch.", ""),
+            }))
+            return
+
         tf = tempfile.mkstemp(prefix="gmtrace_", suffix=".json")[1]
         # No warmup, and the trace starts before the first call, so interval 1
         # is the genuine cold run: compile plus CUDA-graph capture.
@@ -557,6 +599,12 @@ def main():
     ap.add_argument("--runs", type=int, default=None,
                     help="forward passes to profile (default 8). The paper "
                          "profiles seven, giving six inter-marker intervals.")
+    ap.add_argument("--throughput", action="store_true",
+                    help="measure C10 end-to-end throughput per arm (paper "
+                         "5.4): 100 greedy output tokens for generative "
+                         "models, forward samples/s for encoders. Expect small "
+                         "numbers; the paper's 15%% maximum is Florence-2, "
+                         "whose forward pass is a large share of its inference.")
     ap.add_argument("--auto-batch", action="store_true",
                     help="size the batch by the paper's RULE rather than its "
                          "numbers: probe one forward, then fill about 70%% of "
@@ -568,6 +616,8 @@ def main():
         os.environ["GM_BENCH10_PAPER_BATCH"] = "1"
     if o.runs:
         os.environ["GM_BENCH10_RUNS"] = str(o.runs)
+    if o.throughput:
+        os.environ["GM_BENCH10_THROUGHPUT"] = "1"
     if o.save_traces:
         os.environ["GM_BENCH10_TRACE_DIR"] = os.path.abspath(o.save_traces)
         # One stamp for the whole invocation, so an original/fixed pair shares
@@ -597,6 +647,15 @@ def main():
         if o.count:
             print(f"{key}: breaks off={off['breaks']} on={on['breaks']} "
                   f"({off['dtype']}, in {off['in_shape']})")
+        elif o.throughput:
+            po, pn = off.get("throughput"), on.get("throughput")
+            if not po or not pn:
+                print(f"{key}: no throughput measurement "
+                      f"(off={off.get('error')} on={on.get('error')})")
+                continue
+            print(f"{key}  [{off.get('dtype')}, batch/seq {off.get('in_shape')}]")
+            print(f"  throughput        off={po:12.2f} {off.get('unit')}"
+                  f"   on={pn:12.2f}   change={(pn / po - 1) * 100:+.2f}%")
         else:
             print(f"{key}  [{off['dtype']}, batch/seq {off['in_shape']}, "
                   f"mode={off.get('compile_mode')}, runs={off.get('runs')}, "
