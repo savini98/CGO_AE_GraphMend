@@ -197,11 +197,20 @@ that **FP32** outputs are bit-identical and that is the quantity `output_ok`
 checks. The two paths measure different things deliberately, and
 `table2_breaks.py` routes each row to the one that matches the paper.
 
-Two rows have no reference measurement to match: `clap-htsat-fused` and
-`moe-minicpm-x4-base` have no script or log in the reference repository, which
-is consistent with Table 2 listing them as N/A for latency. Both reproduce their
-0% fix rate, which is the only claim Table 2 makes about them, at 2 -> 2 and
-11 -> 11 against the paper's 4 and 15.
+`chronos-bolt-small` needed a third kind of fix. Its breaks are logger calls
+inside the pipeline WRAPPER rather than the inner model, so a bare forward sees
+4 of the 6 no matter how the model is configured, at either size. The reference
+counts the same way this now does, by tracing `pipeline.predict` rather than a
+forward, and that gives 6.
+
+Two rows have no reference measurement to match at all. Neither
+`clap-htsat-fused` nor `moe-minicpm-x4-base` has a script or a log in the
+research repository, consistent with Table 2 listing both as N/A for latency.
+Measured at their real configs they read 2 and 16 against a published 4 and 15.
+They are reported as **NO REFERENCE** rather than as failures, because there is
+no recorded measurement to have reproduced, and matching those numbers would
+mean tuning inputs until they appeared. The claim Table 2 does make about them,
+a 0% fix rate, reproduces exactly: 2 -> 2 and 16 -> 16.
 
 **`[Where]`'s precondition conjunct narrows §4.4.** The rule leads a guard with
 `x is not None` when every path through the true branch dereferences `x` before
