@@ -1,16 +1,23 @@
 """Does GraphMend eliminate graph breaks without changing the output?
 
     python artifact/verify_break_elimination.py             # every model
-    python artifact/verify_break_elimination.py t5-small    # a subset, for a quick check
-    python artifact/verify_break_elimination.py --offline   # skip rows needing downloads
+    python artifact/verify_break_elimination.py t5-small    # a subset
+    python artifact/verify_break_elimination.py --offline   # no downloads
 
 Runs every model twice, GraphMend off then on, and reports what the transform
 removed and whether the result survived it. Exit status is non-zero if any row
-fails to run or changes its output.
+fails to run, changes its output, or if no row ran at all.
 
 The output comparison is the load-bearing half. Eliminating a graph break while
 altering the result is not a fix, so a row whose two arms disagree fails
 outright rather than being reported as a successful reduction.
+
+Correctness is THREE-STATE, not two, and the distinction matters. A row can be
+`identical` (both arms produced the same fingerprint), `CHANGED` (they differ,
+which fails the run), or `n/a` (no fingerprint was available to compare). An
+earlier version of this file collapsed the third case into the first on one
+path and into the second on the other, so the same condition produced a false
+pass through the CPU harness and a false failure through the reference build.
 
 Both arms go through `jac run` with a jac.toml differing only in
 `graphmend_claim_imports`, so what is measured is the compiler's own
@@ -41,32 +48,26 @@ import argparse
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
-import tempfile
 
-# Table 2: (breaks, fix rate %). Keys are this artifact's model names.
-TABLE2 = {
-    "t5-small": (3, 100), "t5-base": (3, 100), "t5-3b": (3, 100),
-    "flan-t5-large": (3, 100), "inclusively-reformulation-it5": (3, 100),
-    "whisper": (3, 100), "whisper-small": (3, 100), "whisper-base": (3, 100),
-    "bart": (7, 100), "bart-base": (7, 100), "rebel-large": (7, 100),
-    "opus-mt-fr-en": (6, 100), "biogpt": (2, 100),
-    "blenderbot-400M-distill": (3, 100), "PegasusForCausalLM": (2, 100),
-    "layoutlmv3-base": (2, 100), "Phi-4-mini-instruct": (5, 100),
-    "grounding-dino": (17, 58), "grounding-dino-base": (17, 58),
-    "longformer-base-4096": (5, 40), "clap-htsat-fused": (4, 0),
-    "chronos-bolt-small": (6, 100), "MoLFormer-XL-both10pct": (5, 100),
-    "Florence-2": (7, 100), "Qwen-Audio-Chat": (2, 100),
-    "moe-minicpm-x4-base": (15, 0), "stella-en-400M-v5": (4, 0),
-}
+# Every row this can measure. Only the names are used: the published counts
+# live in artifact/RESULTS.md, and this script reports what GraphMend did
+# rather than grading itself against a table.
+MODELS = (
+    "t5-small", "t5-base", "t5-3b", "flan-t5-large",
+    "inclusively-reformulation-it5", "whisper", "whisper-small", "whisper-base",
+    "bart", "bart-base", "rebel-large", "opus-mt-fr-en", "biogpt",
+    "blenderbot-400M-distill", "PegasusForCausalLM", "layoutlmv3-base",
+    "Phi-4-mini-instruct", "grounding-dino", "grounding-dino-base",
+    "longformer-base-4096", "clap-htsat-fused", "chronos-bolt-small",
+    "MoLFormer-XL-both10pct", "Florence-2", "Qwen-Audio-Chat",
+    "moe-minicpm-x4-base", "stella-en-400M-v5",
+)
 
-# Rows the small-config harness does not reproduce, routed to the
-# reference-fidelity build in gpu/bench.py. The value is the key bench.py knows
-# them by. NONE OF THESE NEED A GPU: what makes them match is the dtype and the
-# batch, not the device. Measured on CPU, bart-base reads 3 breaks in fp32 and 7
-# in fp16, and grounding-dino reads 17 with the processor batch.
+# Rows the small-config harness does not build the way the reference does,
+# routed to gpu/bench.py. The value is the key bench.py knows them by. NONE OF
+# THESE NEED A GPU: what changes their count is dtype and batch, not device.
 REF_BUILD = {
     "bart": "bart-large-cnn", "bart-base": "bart-base",
     "rebel-large": "rebel-large", "opus-mt-fr-en": "opus-mt-fr-en",
@@ -74,43 +75,40 @@ REF_BUILD = {
     "grounding-dino-base": "grounding-dino-base",
 }
 
-# Rows with NO reference measurement to match. Neither has a script or a log in
-# the research repository, which is consistent with Table 2 listing both as N/A
-# for latency. Their counts are reported and compared, but a difference is not
-# treated as a failure, because there is nothing to have reproduced: the only
-# claim Table 2 makes about them is a 0% fix rate, and that does reproduce.
-# Measured here at their real configs: clap 2 against a published 4, and
-# moe-minicpm 16 against 15.
-NO_REFERENCE = {"clap-htsat-fused", "moe-minicpm-x4-base"}
-
-# chronos-bolt-small reproduces Table 2's 100% FIX RATE (4 -> 0) but not its
-# break COUNT of 6. The two missing breaks are logger calls in the chronos
-# pipeline WRAPPER rather than in the model. [Defer] activates through a
-# forward pre-hook that GraphMend injects at a `torch.compile(...)` assignment
-# site, and that hook is only registered when the compiled object is an
-# nn.Module. Tracing `pipeline.predict` instead does surface all 6 breaks, but
-# then the callable is a lambda, no hook is registered, the rewrite is inert,
-# and the row reads 6 -> 6 with nothing fixed. So the count and the fix cannot
-# both be reproduced here, and the fix rate is the half Table 2 claims.
-COUNT_ONLY_DEVIATION = {"chronos-bolt-small"}
-
+# Rows that download weights or Hub remote code.
 NETWORK_ROWS = {"MoLFormer-XL-both10pct", "Florence-2", "Qwen-Audio-Chat",
                 "chronos-bolt-small", "moe-minicpm-x4-base",
                 "stella-en-400M-v5"}
-# Needs CUDA plus xformers; the CPU fallback measures a different break set.
-GPU_ONLY_ROWS = {"stella-en-400M-v5"}
 
 
-_JAC_TOML = "[run]\ngraphmend = true\ngraphmend_claim_imports = {on}\n"
+def harness_dir():
+    """The directory containing `paper_eval/`.
 
-
-def _jac_dir():
+    Checked rather than assumed: this package is vendored under `jac/` in the
+    standalone artifact repository and sits at the repository root in the
+    upstream branch, and hardcoding either one breaks silently on the other.
+    """
     here = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(os.path.dirname(here), "jac")
+    repo = os.path.dirname(here)
+    for cand in (os.path.join(repo, "jac"), repo):
+        if os.path.isdir(os.path.join(cand, "paper_eval")):
+            return cand
+    return None
 
 
-def run_cpu(keys, jac):
-    """`paper_eval.run_eval` rows, as {key: (before, after)}."""
+def _fail(label, proc):
+    """Report a dead subprocess with its reason, not just an empty result."""
+    print(f"  {label} failed (exit {proc.returncode}).")
+    tail = (proc.stderr or proc.stdout or "").strip().splitlines()
+    for line in tail[-8:]:
+        print(f"    {line[:160]}")
+
+
+def run_small(keys, jac):
+    """Rows measured by `paper_eval.run_eval`, as {key: (before, after, ok)}.
+
+    `ok` is True, False, or None for "no fingerprint to compare".
+    """
     if not keys:
         return {}
     # PYTHONUNBUFFERED: stdout here is a pipe, so without it Python
@@ -122,14 +120,20 @@ def run_cpu(keys, jac):
     for line in p.stdout.splitlines():
         # run_eval prints: key before after fixed% output_ok input
         m = re.match(r"^(\S+)\s+(\d+)\s+(\d+)\s+\d+%\s+(\S+)", line)
-        if m and m.group(1) in TABLE2:
-            out[m.group(1)] = (int(m.group(2)), int(m.group(3)),
-                               m.group(4) == "yes")
+        if m and m.group(1) in MODELS:
+            flag = m.group(4)
+            ok = True if flag == "yes" else False if flag == "NO" else None
+            out[m.group(1)] = (int(m.group(2)), int(m.group(3)), ok)
+    # A non-zero exit with no parsed rows means the harness died: an OOM kill
+    # at the memory ceiling, a missing model, an import error. run_eval writes
+    # that reason to stderr, so surface it instead of leaving bare ERR rows.
+    if p.returncode != 0 and not out:
+        _fail("paper_eval.run_eval", p)
     return out
 
 
-def run_gpu(keys, jac):
-    """`gpu/bench.py --count` rows, as {artifact_key: (before, after)}."""
+def run_reference(keys, jac):
+    """Rows measured by `gpu/bench.py --count`, same return shape."""
     if not keys:
         return {}
     bench = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -139,66 +143,66 @@ def run_gpu(keys, jac):
                         *[REF_BUILD[k] for k in keys]],
                        capture_output=True, text=True, cwd=jac, env=env)
     out = {}
+    inv = {v: k for k, v in REF_BUILD.items()}
     for line in reversed(p.stdout.strip().splitlines()):
         try:
             data = json.loads(line)
         except (ValueError, TypeError):
             continue
-        inv = {v: k for k, v in REF_BUILD.items()}
         for bench_key, r in data.items():
             if bench_key in inv and not r.get("off", {}).get("error"):
                 ho, hn = r["off"].get("out_hash"), r["on"].get("out_hash")
-                out[inv[bench_key]] = (r["off"]["breaks"], r["on"]["breaks"],
-                                       bool(ho) and ho == hn)
+                # None when either arm produced no fingerprint, matching the
+                # small-config path. Collapsing it into False here reported a
+                # CHANGED output, and a failed claim, for a row that simply
+                # had nothing to compare.
+                ok = None if (ho is None or hn is None) else (ho == hn)
+                out[inv[bench_key]] = (r["off"]["breaks"], r["on"]["breaks"], ok)
         break
+    if p.returncode != 0 and not out:
+        _fail("gpu/bench.py --count", p)
     return out
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--cpu-only", action="store_true",
-                    help="skip the one row that genuinely requires CUDA "
-                         "(stella-en-400M-v5, which needs xformers). Every "
-                         "other row runs on CPU.")
     ap.add_argument("--offline", action="store_true",
                     help="skip rows that download weights or remote code")
     ap.add_argument("models", nargs="*",
-                    help="restrict to these rows (default: all of Table 2). "
-                         "Useful for a quick check before committing to the "
-                         "full sweep, which compiles every model twice.")
+                    help="restrict to these rows (default: all). Useful for a "
+                         "quick check before the full sweep, which compiles "
+                         "every model twice.")
     o = ap.parse_args()
-    unknown = [m for m in o.models if m not in TABLE2]
+
+    unknown = [m for m in o.models if m not in MODELS]
     if unknown:
-        sys.exit(f"not Table 2 rows: {', '.join(unknown)}\n"
-                 f"known: {', '.join(sorted(TABLE2))}")
+        sys.exit(f"not known rows: {', '.join(unknown)}\n"
+                 f"known: {', '.join(sorted(MODELS))}")
 
-    jac = _jac_dir()
-    if not os.path.isdir(os.path.join(jac, "paper_eval")):
-        sys.exit(f"cannot find the harness at {jac}/paper_eval")
+    jac = harness_dir()
+    if jac is None:
+        sys.exit("cannot find paper_eval/ next to this artifact directory")
 
-    skip = set(TABLE2) - set(o.models) if o.models else set()
+    skip = set(MODELS) - set(o.models) if o.models else set()
     if o.offline:
         skip |= NETWORK_ROWS
-    if o.cpu_only:
-        skip |= GPU_ONLY_ROWS
 
     ref_keys = [k for k in REF_BUILD if k not in skip]
-    cpu_keys = [k for k in TABLE2 if k not in skip and k not in REF_BUILD]
+    small_keys = [k for k in MODELS if k not in skip and k not in REF_BUILD]
 
-    print(f"routing {len(cpu_keys)} row(s) to the small-config harness and "
+    print(f"routing {len(small_keys)} row(s) to the small-config harness and "
           f"{len(ref_keys)} to the reference-fidelity build")
     print("this takes a while: every row compiles the model twice\n")
 
     got = {}
-    got.update(run_cpu(cpu_keys, jac))
-    got.update({k: v for k, v in run_gpu(ref_keys, jac).items()})
+    got.update(run_small(small_keys, jac))
+    got.update(run_reference(ref_keys, jac))
 
     print(f"{'model':32s} {'breaks':>7s} {'fixed':>6s} {'left':>5s} "
           f"{'rate':>6s} {'output':>10s}")
     print("-" * 74)
-    errors = out_diff = 0
-    tot_b = tot_a = 0
-    for key in sorted(TABLE2):
+    errors = out_diff = tot_b = tot_a = measured = 0
+    for key in sorted(MODELS):
         if key in skip:
             print(f"{key:32s} {'-':>7s} {'-':>6s} {'-':>5s} {'-':>6s} "
                   f"{'skipped':>10s}")
@@ -213,10 +217,10 @@ def main():
         rate = round(100 * fixed / b) if b else 0
         tot_b += b
         tot_a += a
+        measured += 1
         if okout is False:
             out_diff += 1
-        oc = ("identical" if okout else
-              "CHANGED" if okout is False else "n/a")
+        oc = "identical" if okout else ("CHANGED" if okout is False else "n/a")
         print(f"{key:32s} {b:7d} {fixed:6d} {a:5d} {rate:5d}% {oc:>10s}")
 
     print("-" * 74)
@@ -224,6 +228,15 @@ def main():
     tot_rate = round(100 * tot_fixed / tot_b) if tot_b else 0
     print(f"{'TOTAL':32s} {tot_b:7d} {tot_fixed:6d} {tot_a:5d} {tot_rate:5d}%")
     print()
+
+    # A run that measured nothing establishes nothing. Without this, asking for
+    # only network rows under --offline skips every one of them and then
+    # reports "0 of 0 breaks eliminated ... BIT-IDENTICAL" and exits 0, which
+    # is the silently-measures-nothing failure this artifact warns about twice.
+    if measured == 0:
+        print("No rows were measured, so nothing was established. Check the "
+              "model names and the --offline filter.")
+        return 1
 
     if errors:
         print(f"{errors} row(s) failed to run. The claim is not established "
@@ -234,14 +247,12 @@ def main():
               f"FAILS.")
     if not errors and not out_diff:
         print(f"GraphMend eliminated {tot_fixed} of {tot_b} graph breaks "
-              f"({tot_rate}%) across {len([k for k in got])} models, and every "
-              f"row carrying an output comparison produced a BIT-IDENTICAL "
-              f"result with the transform on and off.")
+              f"({tot_rate}%) across {measured} models, and every row carrying "
+              f"an output comparison produced a BIT-IDENTICAL result with the "
+              f"transform on and off.")
         print("Breaks that remain are the categories the paper places out of "
               "scope: dynamic-shape operators and tensor.item() calls.")
     return 1 if (errors or out_diff) else 0
-
-
 
 
 if __name__ == "__main__":

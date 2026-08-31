@@ -111,7 +111,14 @@ def main(keys):
         b0, b1 = off["breaks"], on["breaks"]
         fixed = b0 - b1
         pct = f"{100 * fixed // b0 if b0 else 100}%"
-        correct = "yes" if off["out_hash"] == on["out_hash"] else "NO"
+        # THREE-state, not two. `None == None` is True, so folding the
+        # "no fingerprint available" case in here reported `yes` for a row
+        # that compared nothing, which is a false pass on the correctness
+        # half of the claim.
+        if off["out_hash"] is None or on["out_hash"] is None:
+            correct = "n/a"
+        else:
+            correct = "yes" if off["out_hash"] == on["out_hash"] else "NO"
         # The off/on runs must use identical inputs for the comparison to mean
         # anything; show the shape and flag a mismatch rather than trusting it.
         s0, s1 = off.get("in_shape"), on.get("in_shape")
