@@ -141,6 +141,54 @@ deviation expressed as a rate: Table 2 counts a full pretrained model where
 this harness builds a small config, so the absolute counts differ and the
 percentage moves with them. `[Trap]` fires as expected on both sizes.
 
+**Absolute break counts differ from Table 2: 122 against 147.** The fix RATE
+matches on 26 of 27 rows, but the counts do not, and the reason is specific
+rather than general. 17 of 26 rows match Table 2's break count exactly
+(t5 family 3, Phi-4-mini 5, MoLFormer-XL 5, Florence-2 7, Qwen 2, biogpt 2,
+layoutlmv3 2, longformer 5, Pegasus 2, whisper family 3). Nine differ, and the
+largest group is the BART family:
+
+| model | this artifact | Table 2 | Table 2's breakdown |
+|---|---|---|---|
+| bart, bart-base, rebel-large | 3 | 7 | **DC (4)** + LC (3) |
+| opus-mt-fr-en | 3 | 6 | **DC (3)** + LC (3) |
+| chronos-bolt-small | 4 | 6 | LC (6) |
+| clap-htsat-fused | 2 | 4 | DS (4) |
+| grounding-dino, -base | 16 | 17 | DS + DO + DC |
+| moe-minicpm-x4-base | 11 | 15 | DS (15) |
+
+Those rows lose exactly their data-dependent control-flow breaks and keep the
+logger ones, and the cause is **dtype, not model size**. The BART break site is
+
+```python
+if hidden_states.dtype == torch.float16 and (
+    torch.isinf(hidden_states).any() or torch.isnan(hidden_states).any()
+):
+```
+
+The first conjunct is a static Python bool. In fp32 Dynamo folds it to False and
+never reaches the data-dependent test, so no break is emitted. Measured on the
+same 2-layer config, fp32 gives 3 breaks and fp16 gives 6.
+
+The reference measurement selects fp16 whenever a GPU is present. Every one of
+these four model scripts carries the same line:
+
+```python
+torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32
+```
+
+and the reference `bart-base` logs record `Graph break count: 7` for the
+original arm and `0` for the fixed arm, which is Table 2's row. So the two
+measurements agree about the code and disagree only about dtype: the paper's
+number is fp16 on a GPU, and this harness runs fp32 on CPU because the
+correctness claim it checks is that **FP32** outputs are bit-identical.
+
+The consequence, stated plainly: on those four rows the artifact eliminates a
+smaller break set than the paper reports, so a 100% fix rate there is not
+evidence about the DC breaks, and `[Where]` is not exercised on them. `[Where]`
+is exercised on Phi-4-mini-instruct, Florence-2 and Qwen-Audio-Chat, whose
+counts do match Table 2 exactly.
+
 **`[Where]`'s precondition conjunct narrows §4.4.** The rule leads a guard with
 `x is not None` when every path through the true branch dereferences `x` before
 any observable effect. That is sound for runs that complete, but it converts an
