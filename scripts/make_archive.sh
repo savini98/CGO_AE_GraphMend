@@ -63,4 +63,4 @@ echo "==> writing $OUT"
 tar -czf "$OUT" -C "$STAGE" "$NAME"
 echo "    $(du -h "$OUT" | cut -f1)  $OUT"
 echo
-echo "Upload this to Zenodo, then put the DOI in artifact/APPENDIX.md (A.2, A.3.1)."
+echo "Upload this to Zenodo, then fill {{DOI}} in artifact/appendix.tex (A.2, A.3.1)."

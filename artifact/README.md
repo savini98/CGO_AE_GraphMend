@@ -359,7 +359,7 @@ CGO_AE_GraphMend/
 │   └── _paths.py           #   where the toolchain and the harness live
 └── artifact/               # this package
     ├── README.md           #   this file
-    ├── APPENDIX.md         #   two-page appendix for the paper
+    ├── appendix.tex        #   artifact appendix, for the paper
     ├── Dockerfile.cpu      #   the supported path; pins torch and transformers
     ├── Dockerfile.cuda     #   GPU image for the latency script
     ├── run_all.sh          #   PASS/FAIL kick-the-tires runner
