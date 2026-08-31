@@ -500,6 +500,20 @@ def main():
                   f"on={on['cold_compile_ms']:9.1f}ms")
             print(f"  warm (median)     off={off['warm_ms']:9.3f}ms "
                   f"on={on['warm_ms']:9.3f}ms  speedup={off['warm_ms']/on['warm_ms']:.3f}x")
+            # If the two arms ran at different batch sizes, the raw warm ratio
+            # compares unequal amounts of work and is not a speedup. The
+            # reference runs this artifact was checked against auto-detected a
+            # batch size per arm from free GPU memory, and the two arms landed
+            # on different values (1252 against 1332 for opus-mt-fr-en), so
+            # normalising per sample is the comparable number.
+            _bs = lambda s: (int(str(s).split("x")[0])
+                             if str(s).split("x")[0].isdigit() else None)
+            bo, bn = _bs(off.get("in_shape")), _bs(on.get("in_shape"))
+            if bo and bn and bo != bn:
+                print(f"  warm per-sample   off={off['warm_ms']/bo*1000:9.3f}us "
+                      f"on={on['warm_ms']/bn*1000:9.3f}us  "
+                      f"speedup={(off['warm_ms']/bo)/(on['warm_ms']/bn):.3f}x"
+                      f"   <- arms ran at different batch sizes ({bo} vs {bn})")
             if off.get("recompiled") or on.get("recompiled"):
                 print(f"  RECOMPILED        off={off.get('recompiled')} "
                       f"(variants {off.get('region_variants')}) "

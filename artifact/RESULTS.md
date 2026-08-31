@@ -497,8 +497,53 @@ headline of about 5x on average. `artifact/gpu/bench.py` gives each arm a
 private inductor cache directory for exactly this reason, and that is why its
 cold numbers are lower than a run in which the arms share one.
 
-Identifying the runs behind Table 2's steady-state column remains an author
-task worth doing before camera-ready.
+### The reference runs, and why warm speedup is hardware-dependent
+
+The stored logs under `fx-graph-research/models/*/traces/` identify the machine
+the reference numbers came from, and it is not an RTX 3090:
+
+```
+[GPU] Available for batches: 55.29 GB (target 70% utilization)
+[GPU] Verified: batch_size=1332 fits (peak 0.50 GB)
+/home/ubuntu/miniconda3/envs/fixed_env/...
+```
+
+55.29 GB free implies an 80 GB card on a cloud host. This matters because the
+scripts **auto-detect batch size to fill about 70% of GPU memory**, so the same
+script measures a different workload on different hardware, and warm times are
+not comparable across machines.
+
+For `opus-mt-fr-en` the paired reference run recorded:
+
+| arm | batch | cold | warm |
+|---|---|---|---|
+| original | 1252 | 12222.3 ms | 10.0809 ms |
+| fixed | 1332 | 728.9 ms | 9.0120 ms |
+
+Re-running both arms on an RTX 3090 at **those same batch sizes**, torch 2.7.1,
+private cache per arm:
+
+| quantity | reference | RTX 3090 |
+|---|---|---|
+| cold ratio | 16.8x (the table reports 13x) | **12.48x** |
+| warm, raw ratio | 1.119x | 0.997x |
+| warm, per sample | 1.19x | 1.06x |
+| breaks | 6 -> 0 | **6 -> 0** |
+
+Cold reproduces and the break counts match exactly. Warm does not carry over,
+and the reason is the same mechanism that makes C10 shrink with batch size: on
+the reference card 1332 samples take 9 ms, so the per-launch overhead the
+transform removes is a large share of the total; on a 3090 the same batch takes
+33 ms because it is compute-bound, and the same saved overhead is a small
+share. **Warm speedup therefore needs a card fast enough that launch overhead
+still dominates at the paper's batch sizes.**
+
+Two things follow for anyone re-measuring. First, quote the GPU: a warm number
+without it is not reproducible. Second, the two reference arms auto-detected
+**different** batch sizes (1252 against 1332), so their raw ratio compares
+unequal work; normalised per sample the same run gives 1.19x rather than 1.119x.
+`gpu/bench.py` now prints the per-sample figure whenever the arms differ in
+batch size.
 
 ## Withdrawn: the `[Where]` CUDA-graph defect
 
