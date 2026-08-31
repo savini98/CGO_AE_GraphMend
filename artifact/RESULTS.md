@@ -520,30 +520,37 @@ For `opus-mt-fr-en` the paired reference run recorded:
 | original | 1252 | 12222.3 ms | 10.0809 ms |
 | fixed | 1332 | 728.9 ms | 9.0120 ms |
 
-Re-running both arms on an RTX 3090 at **those same batch sizes**, torch 2.7.1,
-private cache per arm:
+Note that the two reference arms auto-detected **different** batch sizes, 1252
+against 1332, so their raw warm ratio compares unequal work. Equalising that is
+what makes the comparison meaningful. Re-running both arms on an RTX 3090 at
+**the same batch of 1252**, torch 2.7.1, private inductor cache per arm:
 
-| quantity | reference | RTX 3090 |
+| quantity | reference | RTX 3090, equal batch |
 |---|---|---|
-| cold ratio | 16.8x (the table reports 13x) | **12.48x** |
-| warm, raw ratio | 1.119x | 0.997x |
-| warm, per sample | 1.19x | 1.06x |
 | breaks | 6 -> 0 | **6 -> 0** |
+| cold ratio | 13x | **12.48x** |
+| warm | 1.119x (1252 vs 1332) | **1.066x** (32.83 ms vs 30.78 ms) |
 
-Cold reproduces and the break counts match exactly. Warm does not carry over,
-and the reason is the same mechanism that makes C10 shrink with batch size: on
-the reference card 1332 samples take 9 ms, so the per-launch overhead the
-transform removes is a large share of the total; on a 3090 the same batch takes
-33 ms because it is compute-bound, and the same saved overhead is a small
-share. **Warm speedup therefore needs a card fast enough that launch overhead
-still dominates at the paper's batch sizes.**
+**All three reproduce.** The warm figure sits inside the paper's stated 1.05x
+to 1.39x and above its 1.04x geomean. Measured with unequal batches it reads
+0.997x, which is not a slowdown but an artifact of the fixed arm doing 6.4%
+more work, so equal batches matter more here than any other setting.
 
-Two things follow for anyone re-measuring. First, quote the GPU: a warm number
-without it is not reproducible. Second, the two reference arms auto-detected
-**different** batch sizes (1252 against 1332), so their raw ratio compares
-unequal work; normalised per sample the same run gives 1.19x rather than 1.119x.
-`gpu/bench.py` now prints the per-sample figure whenever the arms differ in
-batch size.
+The residual gap against the reference's own 1.119x is hardware, and it is the
+same mechanism that makes C10 shrink as batch grows: on the reference card 1332
+samples take 9 ms, so the per-launch overhead the transform removes is a large
+share of the total, while on a 3090 the same batch takes 33 ms because it is
+compute-bound and the same saved overhead is a smaller share. A warm number is
+therefore only meaningful beside the GPU it was taken on.
+
+**Run 2 is still warming up and should not be treated as steady state.** The
+region windows for the original arm above run
+`10558.5, 2379.5, 33.65, 33.07, 32.83, 32.80, 31.91`: the second is a further
+compile and capture phase, an order of magnitude off steady state.
+`profiling_utils.py` takes `median(run_ms[1:])`, which includes it, but the
+median is robust enough that dropping it as well moves the result by 0.26%
+(32.803 against 32.717). The conclusions are unchanged either way, and
+`gpu/bench.py` reports every window so this is checkable rather than assumed.
 
 ## Withdrawn: the `[Where]` CUDA-graph defect
 
