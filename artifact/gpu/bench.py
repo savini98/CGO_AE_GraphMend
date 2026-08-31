@@ -234,6 +234,36 @@ _BART_FAMILY = {
 
 def build(key, device):
     import torch
+    if key in ("grounding-dino-tiny", "grounding-dino-base"):
+        import numpy as np
+        from PIL import Image
+        from transformers import (AutoConfig, AutoProcessor,
+                                  AutoModelForZeroShotObjectDetection)
+        repo = ("IDEA-Research/grounding-dino-tiny" if key.endswith("tiny")
+                else "IDEA-Research/grounding-dino-base")
+        # fp32 deliberately, and the reference script says why: "Grounding DINO
+        # has mixed components (Swin backbone + BERT text encoder + fusion).
+        # BERT outputs float32, so loading in float16 causes dtype mismatches in
+        # fusion layers." So unlike the BART rows this one is NOT dtype-gated.
+        #
+        # What it IS sensitive to is the input. The break count comes from the
+        # real config's size together with a batch built by the model's own
+        # processor from a real image: a 480x640 RGB frame becomes a
+        # (1, 3, 800, 1066) pixel_values plus a pixel_mask and the tokenised
+        # prompt. jac/paper_eval's small-config version of this row synthesises
+        # tensors instead and sees 16 breaks; with the processor batch it is 17,
+        # which is Table 2's count.
+        cfg = AutoConfig.from_pretrained(repo)
+        proc = AutoProcessor.from_pretrained(repo)
+        m = AutoModelForZeroShotObjectDetection.from_config(cfg)
+        b, _ = _bs(1, 0)
+        rng = np.random.default_rng(0)
+        img = Image.fromarray(rng.integers(0, 255, (480, 640, 3), dtype=np.uint8))
+        enc = proc(images=[img] * b, text=["a cat. a dog."] * b,
+                   return_tensors="pt")
+        inputs = {k: (v.to(device) if hasattr(v, "to") else v)
+                  for k, v in enc.items()}
+        return m.to(device).eval(), inputs
     if key in _BART_FAMILY:
         import transformers
         repo, clsname, _expected = _BART_FAMILY[key]
@@ -370,8 +400,15 @@ def arm():
     if os.environ.get("GM_BENCH10_COUNT"):
         graphs = []
         torch._dynamo.reset()
-        c = torch.compile(model, backend=lambda gm, ex: (graphs.append(gm), gm.forward)[1],
-                          dynamic=False)
+        # `dynamic` is left at its DEFAULT here, deliberately, even though the
+        # latency path below pins it to False. The reference counts breaks with
+        # `dynamo.explain(model)(**batch)` (gpu_utils.safe_explain), which does
+        # not pin it, and on a dynamic-shape model the two disagree: forcing
+        # dynamic=False specialises on shape and adds breaks that the reference
+        # never sees. grounding-dino-tiny reads 19 with dynamic=False and 17,
+        # which is Table 2's count, with the default.
+        c = torch.compile(model,
+                          backend=lambda gm, ex: (graphs.append(gm), gm.forward)[1])
         with torch.no_grad():
             c(**inputs)
         res["graphs"] = len(graphs)

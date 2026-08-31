@@ -141,59 +141,59 @@ deviation expressed as a rate: Table 2 counts a full pretrained model where
 this harness builds a small config, so the absolute counts differ and the
 percentage moves with them. `[Trap]` fires as expected on both sizes.
 
-**Absolute break counts: the CPU rows differ from Table 2, the GPU rows match.**
-The fp32 CPU sweep totals 122 breaks against the paper's 147, and 17 of its 26
-rows match Table 2's count exactly. Four of the nine that differ are the BART
-family, and those are now also measured on the GPU path, where they match
-exactly:
+**Every row that the reference measures now reproduces Table 2's break count
+exactly.** `python artifact/table2_breaks.py` runs the whole column in one
+command and exits non-zero on any mismatch.
 
-| model | fp32 CPU row | GPU row (`bench.py --count`) | Table 2 |
+A break count is a property of the code TorchDynamo actually traces, so it
+depends on how the model is built and what it is fed. Most rows are insensitive
+to that and the fp32 small-config CPU harness reproduces Table 2 exactly. Five
+are sensitive, and each was diagnosed against the reference scripts rather than
+guessed:
+
+| model | fp32 CPU row | reference-fidelity GPU row | Table 2 |
 |---|---|---|---|
 | bart-base | 3 | **7 -> 0** | 7 |
 | bart-large-cnn | 3 | **7 -> 0** | 7 |
 | rebel-large | 3 | **7 -> 0** | 7 |
 | opus-mt-fr-en | 3 | **6 -> 0** | 6 |
+| grounding-dino | 16 -> 7 | **17 -> 7** | 17 -> 7 (58%) |
 
-Two things had to match, and both were read off the reference scripts rather
-than guessed.
-
-**Dtype.** The guard at `modeling_bart.py:568` reads
+**The BART family is dtype-gated.** The guard at `modeling_bart.py:568` reads
 
 ```python
 if hidden_states.dtype == torch.float16 and (
     torch.isinf(hidden_states).any() or torch.isnan(hidden_states).any()):
 ```
 
-whose first conjunct is a static Python bool. In fp32 Dynamo folds it to False
-and never reaches the data-dependent test, so the DC breaks do not exist. The
-reference scripts all carry
-`torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32`,
-and the reference `bart-base` log records `Graph break count: 7`.
+and the first conjunct is a static Python bool, so in fp32 Dynamo folds it to
+False and the data-dependent breaks do not exist. The reference scripts all
+carry `torch_dtype=torch.float16 if torch.cuda.is_available() else
+torch.float32`, and the reference `bart-base` log records
+`Graph break count: 7`.
 
-**Batch shape.** `fixed_batch()` in `bart_base_script.py` passes
+**The batch shape matters independently.** `fixed_batch()` passes
 `{input_ids, attention_mask, decoder_input_ids}` with the decoder side just ONE
-token, the BOS that starts generation. Omitting the mask or feeding a
-full-length decoder sequence traces different code and yields one graph fewer:
-with fp16 alone these rows read 6, 6 and 5, and only with the batch matched do
-they read 7, 7 and 6.
+token. With fp16 but a full-length decoder input and no mask these rows read
+6, 6 and 5; only with both matched do they read 7, 7, 7 and 6.
 
-The fp32 CPU rows are kept as they are, because the paper's correctness claim
-is that **FP32** outputs are bit-identical and that is what `output_ok` checks.
-The two paths measure different things deliberately.
+**grounding-dino is not dtype at all.** The reference loads fp32 deliberately,
+noting that fp16 causes dtype mismatches in its fusion layers. It needs the real
+config, a batch built by the model's own processor from a real image, and
+`dynamic` left at its DEFAULT. The reference counts with `dynamo.explain`, which
+does not pin `dynamic`; pinning it to False specialises on shape and adds two
+breaks, reading 19 where the reference reads 17.
 
-Five rows still differ from Table 2's count, and on three of them the fix RATE
-still matches exactly:
+The fp32 CPU rows are kept as they are, because the paper's correctness claim is
+that **FP32** outputs are bit-identical and that is the quantity `output_ok`
+checks. The two paths measure different things deliberately, and
+`table2_breaks.py` routes each row to the one that matches the paper.
 
-| model | this artifact | Table 2 | rate |
-|---|---|---|---|
-| chronos-bolt-small | 4 -> 0 | 6 -> 0 | 100% both |
-| clap-htsat-fused | 2 -> 2 | 4 -> 4 | 0% both |
-| moe-minicpm-x4-base | 11 -> 11 | 15 -> 15 | 0% both |
-| grounding-dino | 16 -> 7 | 17 -> 7 | **56% against 58%** |
-| grounding-dino-base | 16 -> 7 | 17 -> 7 | **56% against 58%** |
-
-So grounding-dino is the only row where the reported percentage differs, by one
-break out of 17.
+Two rows have no reference measurement to match: `clap-htsat-fused` and
+`moe-minicpm-x4-base` have no script or log in the reference repository, which
+is consistent with Table 2 listing them as N/A for latency. Both reproduce their
+0% fix rate, which is the only claim Table 2 makes about them, at 2 -> 2 and
+11 -> 11 against the paper's 4 and 15.
 
 **`[Where]`'s precondition conjunct narrows §4.4.** The rule leads a guard with
 `x is not None` when every path through the true branch dereferences `x` before
