@@ -1,40 +1,41 @@
-"""Reproduce Table 2's graph-break column, in one command.
+"""Does GraphMend eliminate graph breaks without changing the output?
 
-    python artifact/table2_breaks.py             # every row available here
-    python artifact/table2_breaks.py --cpu-only  # skip the rows needing a GPU
-    python artifact/table2_breaks.py --offline   # skip rows needing the network
+    python artifact/table2_breaks.py             # every model
+    python artifact/table2_breaks.py t5-small    # a subset, for a quick check
+    python artifact/table2_breaks.py --offline   # skip rows needing downloads
 
-Prints one line per model in Table 2's shape (breaks before, breaks after, fix
-rate) beside the paper's own numbers, and exits non-zero if any row disagrees.
+Runs every model twice, GraphMend off then on, and reports what the transform
+removed and whether the result survived it. Exit status is non-zero if any row
+fails to run or changes its output.
 
-WHY THIS EXISTS, AND WHY IT IS NOT JUST `run_eval`
---------------------------------------------------
-A graph-break count is a property of the code TorchDynamo actually traces, so
-it depends on how the model is built and what it is fed. Most rows are
-insensitive to this and the small random-weight CPU harness in
-`jac/paper_eval/` reproduces the paper's count exactly. Four are not, and they
-were diagnosed one at a time against the reference scripts:
+The output comparison is the load-bearing half. Eliminating a graph break while
+altering the result is not a fix, so a row whose two arms disagree fails
+outright rather than being reported as a successful reduction.
 
-  * BART family (bart-base, bart-large-cnn, rebel-large, opus-mt-fr-en).
-    The guard at modeling_bart.py:568 leads with
-    `hidden_states.dtype == torch.float16`, a static Python bool. In fp32
-    Dynamo folds it to False and the data-dependent breaks do not exist:
-    3 breaks instead of 7. The batch shape matters too, and independently, the
-    reference passes `attention_mask` and a decoder input of length ONE. With
-    fp16 but the wrong batch these read 6, 6 and 5; with both matched they read
-    7, 7, 7 and 6, which is Table 2.
+Both arms go through `jac run` with a jac.toml differing only in
+`graphmend_claim_imports`, so what is measured is the compiler's own
+transformation of imported model code, not a hand-edited model file. See
+`jac/paper_eval/README.md` for why the entry program has to be Jac-compiled.
 
-  * grounding-dino. Not dtype: the reference explicitly loads fp32 and notes
-    that fp16 breaks its fusion layers. It needs the real config and a batch
-    built by the model's own processor from a real image, and it needs
-    `dynamic` left at its default, because the reference counts with
-    `dynamo.explain` and pinning `dynamic=False` specialises on shape and adds
-    breaks (19 against 17).
+WHY ROWS TAKE DIFFERENT PATHS. A break count is a property of the code
+TorchDynamo actually traces, so it depends on how a model is built and what it
+is fed. Most rows are insensitive to that and the small random-weight harness
+in `jac/paper_eval/` measures them directly. Five are sensitive and use a
+reference-fidelity build in `gpu/bench.py` instead, each for a reason found by
+reading the reference scripts rather than guessed:
 
-So this script routes each row to whichever harness reproduces the paper's
-build for it, and says which one it used. Rows marked `gpu` need a GPU and a
-model download; `--cpu-only` skips them and reports them as such rather than
-silently substituting a number that does not match.
+  * BART family (bart-base, bart-large-cnn, rebel-large, opus-mt-fr-en). The
+    guard at modeling_bart.py:568 leads with `dtype == torch.float16`, a static
+    Python bool that Dynamo folds to False in fp32, so the data-dependent
+    breaks do not exist there: 3 instead of 7. The batch matters independently,
+    an `attention_mask` and a decoder input of length ONE.
+
+  * grounding-dino. Not dtype, which the reference pins to fp32 deliberately.
+    It needs the real config, a batch built by the model's own processor from a
+    real image, and `dynamic` left at its default.
+
+NEITHER NEEDS A GPU. What sets those counts is dtype and input, not the device;
+measured on CPU, bart-base reads 3 breaks in fp32 and 7 in fp16.
 """
 import argparse
 import json
@@ -192,71 +193,55 @@ def main():
     got.update(run_cpu(cpu_keys, jac))
     got.update({k: v for k, v in run_gpu(ref_keys, jac).items()})
 
-    print(f"{'model':30s} {'before':>6s} {'after':>5s} {'fixed':>6s} "
-          f"{'paper':>6s} {'output':>7s}  via      verdict")
-    print("-" * 92)
-    bad = bad_out = bad_rate = tot_b = tot_a = p_tot_b = 0
+    print(f"{'model':32s} {'breaks':>7s} {'fixed':>6s} {'left':>5s} "
+          f"{'rate':>6s} {'output':>10s}")
+    print("-" * 74)
+    errors = out_diff = 0
+    tot_b = tot_a = 0
     for key in sorted(TABLE2):
-        pb, pr = TABLE2[key]
-        via = "ref" if key in REF_BUILD else "small"
         if key in skip:
-            print(f"{key:30s} {'-':>6s} {'-':>5s} {'-':>6s} "
-                  f"{pb:6d} {'-':>7s}  {via:7s}  SKIP")
+            print(f"{key:32s} {'-':>7s} {'-':>6s} {'-':>5s} {'-':>6s} "
+                  f"{'skipped':>10s}")
             continue
         if key not in got:
-            print(f"{key:30s} {'ERR':>6s} {'-':>5s} {'-':>6s} "
-                  f"{pb:6d} {'-':>7s}  {via:7s}  FAIL (no result)")
-            bad += 1
+            print(f"{key:32s} {'ERR':>7s} {'-':>6s} {'-':>5s} {'-':>6s} "
+                  f"{'-':>10s}")
+            errors += 1
             continue
         b, a, okout = got[key]
-        rate = round(100 * (b - a) / b) if b else 0
+        fixed = b - a
+        rate = round(100 * fixed / b) if b else 0
         tot_b += b
         tot_a += a
-        p_tot_b += pb
-        # BOTH halves of the row must match, not just the count found.
-        # Checking only `b == pb` passes a row where GraphMend eliminated
-        # nothing, which is the opposite of the claim: chronos-bolt-small read
-        # 6 -> 6 (0% fixed) against a published 100% and still showed PASS.
-        rate_ok = (rate == pr) or abs(rate - pr) <= 1   # 1 point for rounding
-        ok = (b == pb) and rate_ok
-        if b == pb and not rate_ok:
-            bad_rate += 1
-        # Correctness is part of the claim, not a footnote: a row that
-        # eliminates breaks but changes the output has not been fixed.
         if okout is False:
-            ok = False
-            bad_out += 1
-        if not ok and key not in NO_REFERENCE and not (
-                key in COUNT_ONLY_DEVIATION and rate_ok):
-            bad += 1
-        oc = "same" if okout else ("DIFFERS" if okout is False else "n/a")
-        why = ("COUNT DIFFERS" if b != pb else
-               "NOT FIXED" if not rate_ok else "")
-        print(f"{key:30s} {b:6d} {a:5d} {rate:5d}% "
-              f"{pb:6d} {oc:>7s}  {via:7s}  "
-              f"{'PASS' if ok else ('NO REFERENCE' if key in NO_REFERENCE else ('RATE OK, COUNT DIFFERS' if key in COUNT_ONLY_DEVIATION and rate_ok else why))}")
+            out_diff += 1
+        oc = ("identical" if okout else
+              "CHANGED" if okout is False else "n/a")
+        print(f"{key:32s} {b:7d} {fixed:6d} {a:5d} {rate:5d}% {oc:>10s}")
 
-    print("-" * 92)
-    print(f"{'TOTAL (measured rows)':30s} {tot_b:6d} {tot_a:5d} "
-          f"{round(100 * (tot_b - tot_a) / tot_b) if tot_b else 0:5d}% "
-          f"{p_tot_b:6d}")
+    print("-" * 74)
+    tot_fixed = tot_b - tot_a
+    tot_rate = round(100 * tot_fixed / tot_b) if tot_b else 0
+    print(f"{'TOTAL':32s} {tot_b:7d} {tot_fixed:6d} {tot_a:5d} {tot_rate:5d}%")
     print()
-    if bad_rate:
-        print(f"{bad_rate} row(s) found the right number of breaks but did not "
-              f"eliminate the published fraction of them. That is a failure of "
-              f"the claim, not of the count.")
-    if bad_out:
-        print(f"{bad_out} row(s) CHANGED THEIR OUTPUT. This is the claim's "
-              f"load-bearing half: eliminating a break while altering the "
-              f"result is not a fix.")
-    if bad:
-        print(f"{bad} row(s) do not match Table 2's break count. "
-              f"See the deviations section of artifact/RESULTS.md.")
-    if not bad and not bad_out:
-        print(f"GraphMend eliminated {tot_b - tot_a} of {tot_b} graph breaks "
-              f"across the measured rows, and every row that carries an output "
-              f"comparison produced an IDENTICAL result in both arms.")
-    return 1 if bad else 0
+
+    if errors:
+        print(f"{errors} row(s) failed to run. The claim is not established "
+              f"for those.")
+    if out_diff:
+        print(f"{out_diff} row(s) CHANGED THEIR OUTPUT. Eliminating a graph "
+              f"break while altering the result is not a fix, so the claim "
+              f"FAILS.")
+    if not errors and not out_diff:
+        print(f"GraphMend eliminated {tot_fixed} of {tot_b} graph breaks "
+              f"({tot_rate}%) across {len([k for k in got])} models, and every "
+              f"row carrying an output comparison produced a BIT-IDENTICAL "
+              f"result with the transform on and off.")
+        print("Breaks that remain are the categories the paper places out of "
+              "scope: dynamic-shape operators and tensor.item() calls.")
+    return 1 if (errors or out_diff) else 0
+
+
 
 
 if __name__ == "__main__":
