@@ -697,9 +697,11 @@ def main():
             #
             # RAW WINDOW is Table 2's metric: the interval between the first two
             # "Torch-Compiled Region: 0/0" markers, original over fixed, with
-            # nothing subtracted. Verified against the shipped 3090
-            # MoLFormer traces, where it gives 6200.7 / 250.9 = 24.71x, the
-            # value printed in Table 2.
+            # nothing subtracted. On our own 3090 MoLFormer traces it gives
+            # 6200.7 / 250.9 = 24.71x, the value printed in Table 2, which is
+            # what identifies this as Table 2's definition. Those traces are
+            # not shipped: a recorded output is not something a reviewer can
+            # check, so the number to trust here is the one this run produces.
             #
             # NO-COMPILE subtracts backend_compile from both arms, following
             # cold_start_no_compile.py in our research repository, on the

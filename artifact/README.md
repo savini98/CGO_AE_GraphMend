@@ -440,9 +440,19 @@ arm's cold start is genuinely cold, and gates on three things:
 | CUDA-graph launches per forward | on-arm must be 1, and the two arms must differ | This is the mechanism. Identical launch counts mean the transform never reached the compiled program, and any timing difference is then noise. |
 | Cold start | ratio above 1.5x | A timing, so a wide floor rather than an expected value: it fails a run where nothing was transformed while tolerating a slower or busier machine than ours. |
 
-Steady state and throughput are printed but **not** gated. Both are small
-effects next to cold start and both move with the GPU and the batch size, so a
-fixed threshold would fail an honest run on different hardware.
+Steady state and throughput are printed but **not** gated, and this artifact
+does not claim Table 2's steady-state column. Both are small effects next to
+cold start and both move with the GPU, so a fixed threshold would fail an
+honest run on different hardware. Steady state has a second and more specific
+reason: Table 2's column does not re-derive from profiler traces. The
+trace-derived warm figure comes out systematically lower, by roughly 0.10 on
+most rows, and that is not a metric artifact -- the mean and the median of the
+warm windows differ by thousandths rather than by 0.10, and GPU-busy and
+GPU-span definitions land in the same place. Section 5.3's statement that every
+steady-state result is at least 1.05x does not hold for those values either.
+Reconciling this is an author task on the paper side, not something the
+artifact can settle, so the artifact reports the measurement and claims nothing
+from it.
 
 To point it at other models, or a subset, so the pretrained download is smaller:
 

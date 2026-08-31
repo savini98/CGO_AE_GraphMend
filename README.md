@@ -122,9 +122,17 @@ TorchInductor cache so cold start is genuinely cold, and gates on what is
 hardware-independent: graph breaks going to zero, and the CUDA-graph launch
 count per forward collapsing to one (t5-small 4 -> 1, MoLFormer-XL 50 -> 1,
 Phi-4-mini 5 -> 1). Cold start is gated with a wide 1.5x floor rather than an
-expected value, and steady state and throughput are printed but not gated,
-because their magnitude moves with the card and the batch size. A different GPU
-will not land on Table 2's numbers and is not meant to.
+expected value. A different GPU will not land on Table 2's magnitudes and is
+not meant to.
+
+**Steady state and throughput are printed but not gated, and this artifact does
+not claim Table 2's steady-state column.** That column does not re-derive from
+profiler traces: the trace-derived warm figure is systematically lower, by
+roughly 0.10 on most rows, and it is not a metric artifact -- mean and median
+differ by thousandths, and GPU-busy and GPU-span definitions agree. §5.3's
+at-least-1.05x statement does not hold for those values either. Reconciling it
+is an author task on the paper side, so the artifact reports the measurement
+and claims nothing from it.
 
 ## What this artifact does not cover
 
