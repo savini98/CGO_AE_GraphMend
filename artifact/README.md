@@ -369,12 +369,12 @@ earlier version of this file reported a `[Where]` defect that made Phi-4 crash
 there; that was the benchmark omitting the eager warm-up the reference scripts
 perform, and it is withdrawn. See "Withdrawn" in [`RESULTS.md`](RESULTS.md).
 
-**`from_pretrained` does not work under `graphmend_claim_imports`.** Python
-ingestion drops `global` and `nonlocal` statements, and
-`transformers/modeling_utils.py` uses `global` three times. The measured rows
-are unaffected, because they build via `from_config` and no measured modeling
-file uses a function-scope `global`, but a reviewer who writes the obvious
-`from_pretrained` script will hit it.
+**`from_pretrained` under `graphmend_claim_imports` used to fail, and now
+works.** Python ingestion dropped `global` and `nonlocal` statements, which
+broke `transformers/modeling_utils.py` where `global` is used three times. Both
+now build a `ScopeDeclStmt` rather than being discarded, and
+`AutoModel.from_pretrained("t5-small")` loads correctly under the opt-in. See
+the deviations section of [`RESULTS.md`](RESULTS.md).
 
 ---
 
@@ -489,12 +489,16 @@ the full 21-row offline sweep.
 **Measured on an RTX 3090:** the `stella-en-400M-v5` row, which needs CUDA and
 xformers and cannot run in the CPU image; the break counts for t5-small,
 Phi-4-mini-instruct and MoLFormer-XL on **full pretrained weights**, which all
-match their small-config CPU counts; and the t5-small latency row.
+match their small-config CPU counts; and C8 latency for all three of those
+models, through `gpu/run_reproducible.sh` from a clean clone.
 
-**Partially measured:** the GPU claims C8, C9 and C10. Only t5-small has a
-latency number, it does not reproduce C8, and C10 is not measured at all. See
-the GPU section of `RESULTS.md`. This is the least complete part of the
-artifact.
+**C8 reproduces; C9 does not.** `gpu/run_reproducible.sh` passes on all three
+models, with raw-window cold ratios of 15.06x, 6.22x and 36.12x and CUDA-graph
+launches going 4->1, 50->1 and 5->1. C9 steady state measures 0.99x to 1.01x
+against Table 2's 1.13x, and C10 reproduces only where the mechanism applies,
+MoLFormer-XL gaining about 70% at batch 1 and nothing at large batch. Both are
+reported by `gpu/run_open_questions.sh`, which never gates. See the GPU section
+of `RESULTS.md`.
 
 **Built and GPU-verified:** `Dockerfile.cuda`. It builds, reaches an RTX 3090,
 and runs GraphMend on it (t5-small, breaks off=3 on=0, measured inside the
@@ -510,20 +514,28 @@ s, four suites 24.1 s on a 4 vCPU runner), from the repository's
 
 **Known defects, disclosed rather than worked around:**
 
-- `global` and `nonlocal` are dropped in Python ingestion, so `from_pretrained`
-  does not work under `graphmend_claim_imports`. The measured rows are
-  unaffected (they build via `from_config`, and no measured modeling file uses
-  a function-scope `global`), but the limitation is real. See the deviations
-  section of `RESULTS.md`.
 - The repository's test suite is 272 passed, 2 failed on this branch. Both
   failures are cache-hit assertions that reproduce identically on the
   merge-base commit, so they are not regressions from this work.
+- Running the rule suites natively, outside the container, can report errors
+  from a torch-internal `DeprecationWarning` that the Jac test runner escalates.
+  The container is the supported path. See the troubleshooting section above.
+
+**Fixed during artifact preparation, previously listed here as defects:**
+
+- `global` and `nonlocal` were dropped in Python ingestion, so `from_pretrained`
+  did not work under `graphmend_claim_imports`. Both now build a
+  `ScopeDeclStmt` and `from_pretrained` loads correctly.
+- `[Where]` emitted a buffer rebind that aliased CUDA-graph pool memory. It now
+  emits an in-place `copy_` into the existing buffer. The related report that
+  `[Where]` crashed Phi-4 under CUDA graphs was a missing eager warm-up in the
+  benchmark and is withdrawn.
 
 **Still open, and needs the authors rather than a reviewer:**
 
 - An archival deposit (for example Zenodo) and its DOI. This is required for
   the Artifacts Available badge and does not exist yet.
-- A public URL for the branch. The measurements were taken in a working
-  checkout.
-- Author, title and DOI placeholders in `APPENDIX.md`.
-- The C8 cold-start claim, which this artifact does not currently reproduce.
+- Author, title, repository URL, commit and DOI placeholders in `APPENDIX.md`.
+- Table 2's C9 steady-state column, which this artifact measures at about 1.0x
+  and cannot reconcile, and its MoLFormer-XL cold-start cell of 24.71x, which
+  measures about 6.2x when both arms compile from the same cache state.

@@ -106,6 +106,11 @@ Stated here rather than left for a reviewer to discover:
   several. `gpu/bench.py` gives each arm its own cache directory; a run that
   lets them share the default does not compare like for like. See the GPU
   section of [artifact/RESULTS.md](artifact/RESULTS.md).
+- **C9 steady state does not reproduce.** Table 2 reads 1.13x for MoLFormer-XL
+  and the paper claims up to 1.39x; this artifact measures 0.99x to 1.01x on a
+  configuration that reproduces the authors' own per-iteration timings to about
+  1%. `artifact/gpu/run_open_questions.sh` reports it and deliberately does not
+  gate on it.
 - The repository's own test suite is **272 passed, 2 failed**. Both failures are
   cache-hit assertions that reproduce identically on the merge-base commit, so
   they pre-date this work.
@@ -115,6 +120,8 @@ Stated here rather than left for a reviewer to discover:
 | Path | What it is |
 |---|---|
 | [`artifact/`](artifact/) | The artifact-evaluation package: guide, results, appendix, Dockerfiles, one-command runner |
+| [`artifact/gpu/run_reproducible.sh`](artifact/gpu/run_reproducible.sh) | The GPU claims that reproduce, with expected values and a real exit status |
+| [`artifact/gpu/run_open_questions.sh`](artifact/gpu/run_open_questions.sh) | The GPU claims that do not (C9, C10). Reports numbers, always exits 0 |
 | [`jac/`](jac/) | The vendored jaclang toolchain, including the GraphMend passes |
 | [`jac/paper_eval/`](jac/paper_eval/) | The reproduction harness: per-model builders, the two-arm runner, the measurement entry program |
 | [`jac/tests/compiler/passes/`](jac/tests/compiler/passes/) | The rule-level graph-count suites |

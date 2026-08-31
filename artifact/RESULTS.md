@@ -147,17 +147,28 @@ any observable effect. That is sound for runs that complete, but it converts an
 true. §4.4 claims exceptions are preserved with type and message; that claim now
 needs the narrower wording.
 
-**`global` and `nonlocal` are silently dropped in Python ingestion.**
-`PyastBuildPass.proc_global` and `proc_nonlocal` convert the statement into a
-`Pass`, and Jac has no equivalent of Python's function-scope `global`. A
-read-then-write function then raises `UnboundLocalError`; a write-only function
-silently writes a local and never updates the global. The practical consequence
-is that **`from_pretrained` does not work under `graphmend_claim_imports`**,
-because `transformers/modeling_utils.py` uses `global` three times
-(`_init_weights`, `_is_quantized`, `_is_ds_init_called`). The rows above are
-unaffected: no modeling file in any measured model uses a function-scope
-`global`, and the builders construct via `from_config`. This is a real
-limitation of the implementation, not of the approach.
+**`global` and `nonlocal` in Python ingestion: FIXED.** This was a real defect
+and it is now repaired. `PyastBuildPass.proc_global` and `proc_nonlocal` used
+to convert the statement into a `Pass`, so a read-then-write function raised
+`UnboundLocalError` and a write-only function silently wrote a local and never
+updated the global. The practical consequence was that `from_pretrained` did
+not work under `graphmend_claim_imports`, because
+`transformers/modeling_utils.py` uses `global` three times (`_init_weights`,
+`_is_quantized`, `_is_ds_init_called`).
+
+Both now build a `ScopeDeclStmt` node, carried through the unitree definition,
+the dispatch surface and the Python backend's `exit_scope_decl_stmt`, so the
+declaration survives ingestion instead of being discarded. Verified end to end
+under `graphmend_claim_imports = true`:
+
+```python
+from transformers import AutoModel
+m = AutoModel.from_pretrained("t5-small")   # FROM_PRETRAINED_OK params= 60506624
+```
+
+The rows above were never affected either way: no modeling file in any measured
+model uses a function-scope `global`, and the builders construct via
+`from_config`.
 
 **Small configs, not full pretrained models.** The registry builds each model
 from a small config with random weights so the harness is fast and offline.
