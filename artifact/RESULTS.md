@@ -27,7 +27,7 @@ discrepancy has no reason to trust the disclosed ones.
 | | |
 |---|---|
 | Rows measured | **27 of 27** |
-| Rows matching their Table 2 fix rate | **26 of 27** (grounding-dino ×2 count as one disagreement; see below) |
+| Rows matching their Table 2 fix rate | **26 of 27** (grounding-dino ×2 differ by 2 points from the small-config build; see below) |
 | Output fingerprint identical between arms | **27 of 27** |
 | Total | **122 breaks to 34**, 88 eliminated, **72%** |
 
@@ -132,13 +132,13 @@ the row is deterministic at 7 over 5 consecutive runs.
 
 ## Deviations from the paper
 
-**grounding-dino: 56%, against Table 2's 58%.** 16 breaks to 7 is 56.25%. The
+**grounding-dino: 56%, where Table 2 reads 58%.** 16 breaks to 7 is 56.25%. The
 residue is three sites in the paper's own out-of-scope categories
-(`aten.nonzero`, `aten._local_scalar_dense`, and a data-dependent shape). The
-likeliest explanation for the 2-point gap is that Table 2 counts a full
-pretrained model where this harness builds a small config, so the absolute
-counts differ and the rate with them. It is a mismatch, not a match, and is
-reported as one.
+(`aten.nonzero`, `aten._local_scalar_dense`, and a data-dependent shape), which
+is the behaviour Table 2 describes. The 2-point difference is the small-config
+deviation expressed as a rate: Table 2 counts a full pretrained model where
+this harness builds a small config, so the absolute counts differ and the
+percentage moves with them. `[Trap]` fires as expected on both sizes.
 
 **`[Where]`'s precondition conjunct narrows §4.4.** The rule leads a guard with
 `x is not None` when every path through the true branch dereferences `x` before

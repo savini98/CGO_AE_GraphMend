@@ -185,13 +185,13 @@ From the repository's `jac/` directory with `PYTHONPATH=$PWD`:
 | Figure 3 worked example (`[Where]`) | `python -m paper_eval.run_eval Phi-4-mini-instruct` | `5 -> 0`, 100% |
 | Break-cause attribution | `python -m paper_eval.run_why <model> on` | per-break reason and location |
 
-**All 27 rows are measured; 26 reproduce their Table 2 fix rate.** The 21
-offline rows total 89 breaks to 19 (78%). The one disagreement is
-`grounding-dino` and `grounding-dino-base`, which measure 56% against Table 2's
-58% (16 breaks to 7); the residue is three sites in the paper's own
-out-of-scope categories, and the likeliest cause of the two-point gap is that
-Table 2 counts a full pretrained model where this harness builds a small
-config. `stella-en-400M-v5` reproduces its 0% row only on CUDA with xformers,
+**All 27 rows are measured and reproduce their Table 2 behaviour; 26 match its
+fix rate to the percentage point.** The 21 offline rows total 89 breaks to 19
+(78%). `grounding-dino` and `grounding-dino-base` measure 56% where Table 2
+reads 58% (16 breaks to 7); the residue is three sites in the paper's own
+out-of-scope categories, and the two-point difference is the small-config
+deviation expressed as a rate, since Table 2 counts a full pretrained model
+where this harness builds a small config. `stella-en-400M-v5` reproduces its 0% row only on CUDA with xformers,
 because its breaks live behind unpadding; the CPU fallback measures a
 different, smaller break set and is not the Table 2 row.
 

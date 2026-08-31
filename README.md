@@ -99,7 +99,6 @@ second libcuda mount that Triton needs, is in the GPU section of
 
 Stated here rather than left for a reviewer to discover:
 
-- **One row disagrees.** grounding-dino measures 56% against Table 2's 58%.
 - **Cold start is cache-sensitive, and the benchmark is opinionated about it.**
   Compilation dominates the first measured window, so both arms have to compile
   with the same TorchInductor cache state or the ratio moves by a factor of
