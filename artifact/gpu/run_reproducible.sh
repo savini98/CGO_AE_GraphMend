@@ -45,7 +45,7 @@ REPO="$(cd "$GPU_DIR/../.." && pwd)"
 PYTHON="${PYTHON:-python3}"
 LOG_DIR="${TMPDIR:-/tmp}/graphmend-gpu-$$"
 mkdir -p "$LOG_DIR"
-export PYTHONPATH="$REPO/jac${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH="$REPO/jaseci/jac:$REPO${PYTHONPATH:+:$PYTHONPATH}"
 
 read -r -a MODELS <<< "${GM_GPU_MODELS:-t5-small MoLFormer-XL-both10pct Phi-4-mini-instruct}"
 
@@ -99,11 +99,10 @@ rule
 echo "STEP 1  graph breaks, GraphMend off vs on"
 rule
 
-# bench.py derives PYTHONPATH and PAPER_EVAL_DIR for its arm subprocesses from
-# the working directory, so it has to be invoked from jac/. Running it from the
-# repo root fails every row with "No module named jaclang".
+# bench.py resolves the toolchain and the harness from paper_eval/_paths.py
+# rather than from the working directory, so it runs from anywhere.
 COUNTS_JSON="$LOG_DIR/counts.json"
-( cd "$REPO/jac" && "$PYTHON" "$GPU_DIR/bench.py" --count --json "${MODELS[@]}" ) \
+( cd "$REPO" && "$PYTHON" "$GPU_DIR/bench.py" --count --json "${MODELS[@]}" ) \
     > "$COUNTS_JSON" 2> "$LOG_DIR/counts.err"
 tail -1 "$COUNTS_JSON" > "$COUNTS_JSON.line" 2>/dev/null
 
@@ -164,7 +163,7 @@ echo "  this compiles each model twice, once per arm, and is slow on a cold cach
 echo
 
 TIME_JSON="$LOG_DIR/timing.json"
-( cd "$REPO/jac" && "$PYTHON" "$GPU_DIR/bench.py" --json "${MODELS[@]}" ) \
+( cd "$REPO" && "$PYTHON" "$GPU_DIR/bench.py" --json "${MODELS[@]}" ) \
     > "$TIME_JSON" 2> "$LOG_DIR/timing.err"
 tail -1 "$TIME_JSON" > "$TIME_JSON.line" 2>/dev/null
 

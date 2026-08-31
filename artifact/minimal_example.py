@@ -3,7 +3,7 @@
 RUN IT LIKE THIS, from THIS directory:
 
     cd artifact
-    PYTHONPATH=../jac python -m jaclang run minimal_example.py
+    PYTHONPATH=../jaseci/jac python -m jaclang run minimal_example.py
 
 Two things about that command line are load-bearing, and getting either wrong
 gives you a clean run that measures nothing at all:
@@ -24,7 +24,7 @@ gives you a clean run that measures nothing at all:
      you work somewhere else.
 
 This file is a template for your own measurement script. The authoritative
-path is jac/paper_eval/, which does the same thing for both arms and compares
+path is paper_eval/, which does the same thing for both arms and compares
 them; this one runs a single arm so that the two points above are visible in
 isolation.
 

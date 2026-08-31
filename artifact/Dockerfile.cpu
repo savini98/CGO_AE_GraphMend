@@ -16,13 +16,13 @@
 #
 # The full 21-row offline sweep, which the default entrypoint does not run:
 #   docker run --rm --entrypoint bash graphmend-cpu \
-#     -lc 'cd /opt/jaseci/jac && python -m paper_eval.run_eval'
+#     -lc 'cd /opt/artifact && python -m paper_eval.run_eval'
 #
 # The 6 network rows need network and a Hugging Face cache; mount one so a
 # re-run does not re-download:
 #   docker run --rm -v "$PWD/hf-cache:/hf" -e HF_HOME=/hf \
 #     --entrypoint bash graphmend-cpu \
-#     -lc 'cd /opt/jaseci/jac && python -m paper_eval.run_eval Florence-2'
+#     -lc 'cd /opt/artifact && python -m paper_eval.run_eval Florence-2'
 #
 # BUILT AND VERIFIED. Every break-elimination number in artifact/README.md was
 # measured inside this image, so `docker run` here executes the same binary that
@@ -92,7 +92,7 @@ RUN pip install --index-url https://download.pytorch.org/whl/cpu \
 
 RUN pip install "transformers==${TRANSFORMERS_VERSION}"
 
-# The six NETWORK_MODELS rows in jac/paper_eval/registry.py are opt-in: the
+# The six NETWORK_MODELS rows in paper_eval/registry.py are opt-in: the
 # default entrypoint never runs them, because they download code or weights.
 # Their dependencies are installed anyway, so that a reviewer who does opt in
 # gets a download rather than a traceback. Each line names the row that needs
@@ -122,14 +122,22 @@ assert torch.version.cuda is None, 'expected the CPU wheel'"
 # manifest is jac.toml and the shipped binary is built with Zig, which this
 # image deliberately does not do.
 #
-# jac.toml at the repo root carries [dev] jaclang_source = "jac", which reroutes
+# jac.toml at the repo root carries the GraphMend run keys, which reroutes
 # `import jaclang` to the in-tree source. It is copied for that reason and for
 # its [test] paths.
-COPY jac.toml /opt/jaseci/jac.toml
-COPY jac /opt/jaseci/jac
-COPY artifact /opt/jaseci/artifact
+# The toolchain is not vendored in this repository: it is the pinned jaseci
+# submodule plus patches/graphmend.patch. Copy the submodule checkout, the
+# patch, the harness and the artifact package, then let setup.sh assemble them.
+# The build context must therefore be a clone with submodules initialised:
+#   git clone --recurse-submodules <url> && docker build -f artifact/Dockerfile.cpu .
+COPY jac.toml   /opt/artifact/jac.toml
+COPY jaseci     /opt/artifact/jaseci
+COPY patches    /opt/artifact/patches
+COPY scripts    /opt/artifact/scripts
+COPY paper_eval /opt/artifact/paper_eval
+COPY artifact   /opt/artifact/artifact
 
-ENV PYTHONPATH=/opt/jaseci/jac
+ENV PYTHONPATH=/opt/artifact/jaseci/jac:/opt/artifact
 
 # Materialize the typeshed stdlib stubs. Without this the image builds fine and
 # then fails at RUN time on the first real compile, because type inference is on
@@ -142,7 +150,11 @@ ENV PYTHONPATH=/opt/jaseci/jac
 # A checkout that already carries the stubs short-circuits it with no download.
 # A checkout that symlinks them at a shared tree (which is what a git worktree
 # tends to do) copies a link into the image that dangles, and this replaces it.
-RUN python /opt/jaseci/artifact/fetch_typeshed.py /opt/jaseci/jac
+# setup.sh applies patches/graphmend.patch into the submodule and fetches the
+# typeshed stubs. It verifies the submodule is at the pinned commit first, so a
+# context built from the wrong checkout fails here with a clear message rather
+# than much later with a missing pass.
+RUN bash /opt/artifact/scripts/setup.sh
 
 # Warm the compiler cache at build time. The first jac command on a cold cache
 # compiles the Jac compiler's own .jac sources into $XDG_CACHE_HOME/jac/jir,
@@ -162,7 +174,7 @@ RUN python /opt/jaseci/artifact/fetch_typeshed.py /opt/jaseci/jac
 # importlib.metadata and dies with PackageNotFoundError.
 #
 # The `test -d` guards keep a warm-up that silently wrote nothing from passing.
-RUN cd /opt/jaseci/jac \
+RUN cd /opt/artifact/jaseci/jac \
     && printf 'with entry { print("jac toolchain ok"); }\n' > /tmp/warm.jac \
     && python -m jaclang run /tmp/warm.jac \
     && rm -f /tmp/warm.jac \
@@ -170,8 +182,8 @@ RUN cd /opt/jaseci/jac \
     && test -d "$XDG_CACHE_HOME/jac/jir/modules" \
     && chmod -R a+rX /opt/jac/cache
 
-WORKDIR /opt/jaseci
+WORKDIR /opt/artifact
 
 # Default: the kick-the-tires path. Extra arguments are passed through, so
 # `docker run --rm graphmend-cpu --quick` works.
-ENTRYPOINT ["bash", "/opt/jaseci/artifact/run_all.sh"]
+ENTRYPOINT ["bash", "/opt/artifact/artifact/run_all.sh"]

@@ -125,20 +125,32 @@ print('torch', torch.__version__, 'cuda:', torch.version.cuda); \
 print('transformers', transformers.__version__); \
 assert torch.version.cuda is not None, 'expected a CUDA wheel, got the CPU build'"
 
-COPY jac.toml /opt/jaseci/jac.toml
-COPY jac /opt/jaseci/jac
-COPY artifact /opt/jaseci/artifact
+# The toolchain is not vendored in this repository: it is the pinned jaseci
+# submodule plus patches/graphmend.patch. Copy the submodule checkout, the
+# patch, the harness and the artifact package, then let setup.sh assemble them.
+# The build context must therefore be a clone with submodules initialised:
+#   git clone --recurse-submodules <url> && docker build -f artifact/Dockerfile.cpu .
+COPY jac.toml   /opt/artifact/jac.toml
+COPY jaseci     /opt/artifact/jaseci
+COPY patches    /opt/artifact/patches
+COPY scripts    /opt/artifact/scripts
+COPY paper_eval /opt/artifact/paper_eval
+COPY artifact   /opt/artifact/artifact
 
-ENV PYTHONPATH=/opt/jaseci/jac
+ENV PYTHONPATH=/opt/artifact/jaseci/jac:/opt/artifact
 
 # Both steps are explained at length in artifact/Dockerfile.cpu, which carries
 # the identical pair. In short: the typeshed stdlib stubs are gitignored and
 # must be materialized or no Jac compile works, and the warm-up is a real
 # `jac run` because it caches 162 modules where `--help` caches 31, and because
 # it doubles as the build-time proof that the toolchain works in this image.
-RUN python /opt/jaseci/artifact/fetch_typeshed.py /opt/jaseci/jac
+# setup.sh applies patches/graphmend.patch into the submodule and fetches the
+# typeshed stubs. It verifies the submodule is at the pinned commit first, so a
+# context built from the wrong checkout fails here with a clear message rather
+# than much later with a missing pass.
+RUN bash /opt/artifact/scripts/setup.sh
 
-RUN cd /opt/jaseci/jac \
+RUN cd /opt/artifact/jaseci/jac \
     && printf 'with entry { print("jac toolchain ok"); }\n' > /tmp/warm.jac \
     && python -m jaclang run /tmp/warm.jac \
     && rm -f /tmp/warm.jac \
@@ -146,10 +158,10 @@ RUN cd /opt/jaseci/jac \
     && test -d "$XDG_CACHE_HOME/jac/jir/modules" \
     && chmod -R a+rX /opt/jac/cache
 
-WORKDIR /opt/jaseci
+WORKDIR /opt/artifact
 
 # The benchmark takes model names, so `docker run ... graphmend-cuda t5-small`
 # works and `--count` reports break counts instead of timings. It prints
 # CUDA-graph launches per arm beside every number, which is the check that the
 # transform actually fired: identical launch counts mean it did not.
-ENTRYPOINT ["python", "/opt/jaseci/artifact/gpu/bench.py"]
+ENTRYPOINT ["python", "/opt/artifact/artifact/gpu/bench.py"]

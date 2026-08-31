@@ -42,14 +42,14 @@ another.
 Both arms load FULL PRETRAINED checkpoints, because latency depends on real
 layer counts and widths, and both run under `jac run` with their own jac.toml:
 the entry program has to be Jac-compiled or every [Defer] rewrite stays inert
-(see jac/paper_eval/README.md). Each arm gets a private inductor and Triton
+(see paper_eval/README.md). Each arm gets a private inductor and Triton
 cache, or the second arm skips codegen and its "cold" run is not cold.
 
 Compilation is `torch.compile(m, backend="inductor", mode="reduce-overhead",
 fullgraph=False)`, matching the paper's model scripts.
 
-    PYTHONPATH=$PWD python ../artifact/gpu/bench.py t5-small
-    PYTHONPATH=$PWD python ../artifact/gpu/bench.py --count t5-small
+    python artifact/gpu/bench.py t5-small
+    python artifact/gpu/bench.py --count t5-small
 
 Known limitation: models that mutate module state inside `forward` cannot be
 run under CUDA graphs at all. MoLFormer-XL registers a buffer in `forward`, and
@@ -59,6 +59,14 @@ paper's CUDA-graph setup.
 """
 import argparse, json, os, shutil, statistics, subprocess, sys, tempfile
 from datetime import datetime
+
+# The harness owns the path layout; bench.py borrows it so the two cannot drift.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from paper_eval._paths import (  # noqa: E402
+    ARTIFACT_ROOT as _ARTIFACT_ROOT,
+    ARM_PYTHONPATH as _ARM_PYTHONPATH,
+)
+
 
 
 def _stamp_now():
@@ -87,7 +95,7 @@ def _load_weights(m, repo, rev=None):
     GraphMend claims transformers/modeling_utils.py and the recompiled
     `no_init_weights()` raises UnboundLocalError on its `global _init_weights`
     (see globrepro/ for a 12-line standalone repro). The direct constructor
-    path that jac/paper_eval/registry.py already uses is unaffected, so the
+    path that paper_eval/registry.py already uses is unaffected, so the
     weights are loaded into it by hand.
     """
     import glob, os, torch
@@ -519,7 +527,11 @@ def arm():
 
 
 def run(key, on, count):
-    repo, here = os.getcwd(), os.path.abspath(__file__)
+    # Resolved from paper_eval/_paths.py rather than from the working
+    # directory, so this runs from anywhere. _ARTIFACT_ROOT is where
+    # `paper_eval` imports from; _ARM_PYTHONPATH additionally carries the
+    # patched toolchain, which must win over any pip-installed jaclang.
+    here = os.path.abspath(__file__)
     wd = tempfile.mkdtemp(prefix=f"gmb10_{key}_")
     # Cold start is only cold against an EMPTY compiler cache. TorchInductor and
     # Triton both persist generated kernels to disk, so without a private cache
@@ -532,7 +544,8 @@ def run(key, on, count):
         open(os.path.join(wd, "jac.toml"), "w").write(
             _TOML.format(on="true" if on else "false"))
         shutil.copy(here, os.path.join(wd, "bench10.py"))
-        env = dict(os.environ, PYTHONPATH=repo, PAPER_EVAL_DIR=repo,
+        env = dict(os.environ, PYTHONPATH=_ARM_PYTHONPATH,
+                   PAPER_EVAL_DIR=_ARTIFACT_ROOT,
                    GM_MODEL=key, TORCHINDUCTOR_CACHE_DIR=icache,
                    TRITON_CACHE_DIR=tcache, **{ARM: "1"})
         # The arm learns which side it is from the environment rather than from

@@ -20,7 +20,7 @@ set -uo pipefail
 
 ART_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$ART_DIR/.." && pwd)"
-JAC="$REPO/jac"
+JAC="$REPO/jaseci/jac"
 PYTHON="${PYTHON:-python3}"
 LOG_DIR="${TMPDIR:-/tmp}/graphmend-artifact-$$"
 mkdir -p "$LOG_DIR"
@@ -30,10 +30,11 @@ mkdir -p "$LOG_DIR"
 # so default to one process and let a reviewer with headroom raise it.
 export JAC_TEST_JOBS="${JAC_TEST_JOBS:-1}"
 
-# `jac run` and `jac test` here are the in-repo compiler source, reached with
-# PYTHONPATH rather than a pip install. The toolchain declares no runtime PyPI
-# dependencies, so there is nothing else to install for it.
-export PYTHONPATH="$JAC${PYTHONPATH:+:$PYTHONPATH}"
+# `jac run` and `jac test` here are the patched toolchain in the jaseci
+# submodule, reached with PYTHONPATH rather than a pip install; the artifact
+# root is on the path too so that `paper_eval` imports. The toolchain declares
+# no runtime PyPI dependencies, so there is nothing else to install for it.
+export PYTHONPATH="$JAC:$REPO${PYTHONPATH:+:$PYTHONPATH}"
 
 RESULTS=()
 FAILED=0
@@ -49,10 +50,17 @@ rule
 echo "STEP 0  environment"
 rule
 
-if [ ! -f "$JAC/paper_eval/run_eval.py" ]; then
-    echo "  cannot find $JAC/paper_eval/run_eval.py"
-    echo "  run this script from a checkout of the artifact branch, as"
-    echo "  'bash artifact/run_all.sh'."
+if [ ! -d "$JAC/jaclang/compiler/passes/graphmend" ]; then
+    echo "  no GraphMend passes under $JAC"
+    echo
+    echo "  The toolchain is a pinned jaseci submodule plus"
+    echo "  patches/graphmend.patch, and one or both is missing. Run:"
+    echo "    bash scripts/setup.sh"
+    exit 2
+fi
+if [ ! -f "$REPO/paper_eval/run_eval.py" ]; then
+    echo "  cannot find $REPO/paper_eval/run_eval.py"
+    echo "  run this from a checkout of the artifact, as 'bash artifact/run_all.sh'."
     exit 2
 fi
 
@@ -201,7 +209,7 @@ echo
 
 EVAL_LOG="$LOG_DIR/run_eval.log"
 (
-    cd "$JAC" || exit 1
+    cd "$REPO" || exit 1
     "$PYTHON" -m paper_eval.run_eval "${KEYS[@]}"
 ) 2>&1 | tee "$EVAL_LOG"
 
@@ -259,8 +267,8 @@ printf '%s\n' "${RESULTS[@]}"
 echo
 if [ "$FAILED" = "0" ]; then
     echo "All checks passed. Full output kept in $LOG_DIR"
-    echo "Next: the complete 21-row offline sweep, from the jac/ directory:"
-    echo "  PYTHONPATH=\$PWD $PYTHON -m paper_eval.run_eval"
+    echo "Next: the complete 21-row offline sweep, from the repository root:"
+    echo "  $PYTHON -m paper_eval.run_eval"
 else
     echo "Some checks failed. Full output kept in $LOG_DIR"
     echo "artifact/README.md has a troubleshooting section; the two gotchas at"

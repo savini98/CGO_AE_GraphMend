@@ -142,9 +142,18 @@ is a template for your own script that gets both gotchas right.
 
 ## Quick start
 
+The toolchain is not vendored in this repository. It is upstream
+`jaseci-labs/jaseci` as a submodule frozen at
+`e2b6b9f4bdec510622410f046c8bd5427980c33f` (jaclang 0.36.1), plus
+[`../patches/graphmend.patch`](../patches/graphmend.patch), which is everything
+GraphMend adds: 203 files, 166 of them new, no deletions.
+[`../scripts/setup.sh`](../scripts/setup.sh) assembles the two and is
+idempotent.
+
 In a container, with the environment pinned. This is the supported path:
 
 ```bash
+git clone --recurse-submodules <url> && cd CGO_AE_GraphMend
 docker build -f artifact/Dockerfile.cpu -t graphmend-cpu .   # context = repo root, ~5 min
 docker run --rm graphmend-cpu                                # runs run_all.sh
 docker run --rm graphmend-cpu --quick                        # shorter
@@ -157,9 +166,14 @@ it is in both the default set and `--quick`. Below that the container is
 SIGKILLed and the row reports `ERR` with exit 137. Check the current limit with
 `docker info | grep "Total Memory"`.
 
+`--recurse-submodules` matters: without it `jaseci/` is empty and the build
+fails at `COPY jaseci`. An existing clone is fixed with `git submodule update
+--init`.
+
 Or from a checkout, with `torch` and `transformers` importable:
 
 ```bash
+bash scripts/setup.sh               # submodule + patch + typeshed stubs, once
 bash artifact/run_all.sh            # 4 rule suites + 5 models, CPU, no network
 bash artifact/run_all.sh --quick    # 4 rule suites + 2 models
 bash artifact/run_all.sh --suites   # 4 rule suites only (fastest real check)
@@ -174,7 +188,7 @@ The full 21-row offline sweep, which the default run does not include:
 
 ```bash
 docker run --rm --entrypoint bash graphmend-cpu \
-  -lc 'cd /opt/jaseci/jac && python -m paper_eval.run_eval'
+  -lc 'cd /opt/artifact && python -m paper_eval.run_eval'
 ```
 
 ---
@@ -196,12 +210,11 @@ reproduction. `Dockerfile.cpu` installs `torch==2.12.1+cpu` and
 12.6.
 
 The jaclang toolchain declares no runtime PyPI dependencies. It is used
-directly from the source in this repository, put on `PYTHONPATH`, rather than
-pip installed:
+directly from the patched submodule, put on `PYTHONPATH`, rather than pip
+installed:
 
 ```bash
-cd jac
-PYTHONPATH=$PWD python -m jaclang --help
+PYTHONPATH=$PWD/jaseci/jac python -m jaclang --help
 ```
 
 `--help` rather than `--version`: used from source the toolchain has no
@@ -213,37 +226,32 @@ sources (211 modules) into a content-keyed cache under `~/.cache/jac/jir`
 (`$XDG_CACHE_HOME` is honored; macOS uses `~/Library/Caches/jac/jir`). Both
 Dockerfiles do this once at image build time so a reviewer does not pay it.
 
-A fresh clone also needs the typeshed stdlib stubs, which are gitignored:
-
-```bash
-python artifact/fetch_typeshed.py jac
-```
-
-Without them no Jac compilation works at all, and the failure appears as
-`TypeshedUnavailableError` on the first real compile rather than at import.
-Both Dockerfiles run this.
+`scripts/setup.sh` also materializes the typeshed stdlib stubs, which are
+gitignored. Without them no Jac compilation works at all, and the failure
+appears as `TypeshedUnavailableError` on the first real compile rather than at
+import. Both Dockerfiles run `setup.sh` for this reason.
 
 ---
 
 ## Claim to command to expected output
 
-Run the `run_eval`, `run_why` and `run_fullgraph` commands from the **`jac/`
-directory** of the checkout, which is where `run_eval.py` expects to find
-`paper_eval/`. Set `PYTHONPATH=$PWD` so this repository's jaclang is the one
-imported and not any pip-installed `jaclang`, which predates GraphMend.
-`run_all.sh` resolves its own paths and works from any directory; it is written
-here relative to the repository root.
+Run everything from the **repository root**, after `bash scripts/setup.sh`.
+The harness resolves the toolchain and its own location from
+`paper_eval/_paths.py` rather than from the working directory, so no
+`PYTHONPATH` is needed and the commands work from anywhere with the root
+importable. `GM_JACLANG_DIR` overrides the toolchain location if you keep the
+patched tree elsewhere.
 
 | # | Claim | Command | Expected output | Hardware | Wall clock |
 |---|---|---|---|---|---|
 | C1 | Each rule collapses 2+ FX graphs into 1 | `bash artifact/run_all.sh --suites` | `18 passed`, `0 skipped`. Breakdown: `[Trap]` 6, `[Where]` 3, `[Defer]` 7, import-claiming 2 | CPU | ~1 to 3 min (est.); 24 s in CI with parallel workers (measured) |
-| C2 | Table 2 break elimination, 21 offline rows | `PYTHONPATH=$PWD python -m paper_eval.run_eval` | The 21-row table below, ending `TOTAL 89 19 78% (eliminated 70/89)` | CPU | ~1.5 to 3 h cold (est.) |
+| C2 | Table 2 break elimination, 21 offline rows | `python -m paper_eval.run_eval` | The 21-row table below, ending `TOTAL 89 19 78% (eliminated 70/89)` | CPU | ~1.5 to 3 h cold (est.) |
 | C3 | Transformed output is bit-identical in FP32 | same command as C2 | `output_ok` is `yes` on **every** row, including the rows that fix nothing | CPU | included in C2 |
-| C2 | Figure 3 worked example: Phi-4-mini LongRoPE, the `[Where]` demonstration | `PYTHONPATH=$PWD python -m paper_eval.run_eval Phi-4-mini-instruct` | `Phi-4-mini-instruct 5 0 100% yes`. The 5 matches Table 2's count, not just its rate | CPU | ~5 to 15 min cold (est.) |
-| C2 | Table 2 rows that are correctly **not** fixed | `PYTHONPATH=$PWD python -m paper_eval.run_eval longformer-base-4096 clap-htsat-fused` | `5 -> 3` (40%) and `2 -> 2` (0%). A clean sweep here would be the failure | CPU | ~10 to 25 min cold (est.) |
-| C2 | Break-cause attribution (Table 2's DC / LC / VG / DS / DO / TI column) | `PYTHONPATH=$PWD python -m paper_eval.run_why longformer-base-4096 on` | Per-break reason text and source location, so a surviving break can be checked against the paper's declared out-of-scope category | CPU | ~3 to 10 min per model (est.) |
-| C2 | The 6 network rows (Hub remote code, `trust_remote_code`) | `PYTHONPATH=$PWD python -m paper_eval.run_eval Florence-2 MoLFormer-XL-both10pct chronos-bolt-small Qwen-Audio-Chat stella-en-400M-v5 moe-minicpm-x4-base` | The network table below. `stella-en-400M-v5` needs CUDA and xformers and cannot be measured in the CPU image | CPU + network | ~1 to 2 h plus downloads (est.) |
-| C4 | Full-graph capture for serving, §5.6 | `PYTHONPATH=$PWD python -m paper_eval.run_fullgraph` | `off failed / on ok` on every row. Asymmetric by construction: both-pass or both-fail is a FAIL. `backend="eager"` isolates capture from compilation, so it is deterministic and needs **no GPU** | CPU | ~10 min |
+| C2 | Figure 3 worked example: Phi-4-mini LongRoPE, the `[Where]` demonstration | `python -m paper_eval.run_eval Phi-4-mini-instruct` | `Phi-4-mini-instruct 5 0 100% yes`. The 5 matches Table 2's count, not just its rate | CPU | ~5 to 15 min cold (est.) |
+| C2 | Table 2 rows that are correctly **not** fixed | `python -m paper_eval.run_eval longformer-base-4096 clap-htsat-fused` | `5 -> 3` (40%) and `2 -> 2` (0%). A clean sweep here would be the failure | CPU | ~10 to 25 min cold (est.) |
+| C2 | Break-cause attribution (Table 2's DC / LC / VG / DS / DO / TI column) | `python -m paper_eval.run_why longformer-base-4096 on` | Per-break reason text and source location, so a surviving break can be checked against the paper's declared out-of-scope category | CPU | ~3 to 10 min per model (est.) |
+| C2 | The 6 network rows (Hub remote code, `trust_remote_code`) | `python -m paper_eval.run_eval Florence-2 MoLFormer-XL-both10pct chronos-bolt-small Qwen-Audio-Chat stella-en-400M-v5 moe-minicpm-x4-base` | The network table below. `stella-en-400M-v5` needs CUDA and xformers and cannot be measured in the CPU image | CPU + network | ~1 to 2 h plus downloads (est.) |
+| C4 | Full-graph capture for serving, §5.6 | `python -m paper_eval.run_fullgraph` | `off failed / on ok` on every row. Asymmetric by construction: both-pass or both-fail is a FAIL. `backend="eager"` isolates capture from compilation, so it is deterministic and needs **no GPU** | CPU | ~10 min |
 
 Wall-clock figures marked `(est.)` are estimates, not stopwatch measurements.
 The dominant cost in C2 is the cold compile cache: GraphMend claims the imported
@@ -284,7 +292,7 @@ Every number below was measured inside the image this artifact ships
 
 ### The 21 offline rows
 
-`PYTHONPATH=$PWD python -m paper_eval.run_eval`
+`python -m paper_eval.run_eval`
 
 | Model | Breaks, Table 2 | Breaks, here | After | Fixed | Table 2 | Rule |
 |---|---|---|---|---|---|---|
@@ -444,10 +452,9 @@ region-window ratio, which is Table 2's metric, and a compile-subtracted figure
 that excludes `backend_compile` spans from both arms -- rather than picking one:
 
 ```bash
-cd jac
-PYTHONPATH=$PWD python ../artifact/gpu/bench.py t5-small
-PYTHONPATH=$PWD python ../artifact/gpu/bench.py --count t5-small     # breaks only
-PYTHONPATH=$PWD python ../artifact/gpu/bench.py --paper-batch t5-small
+python artifact/gpu/bench.py t5-small
+python artifact/gpu/bench.py --count t5-small        # break counts only
+python artifact/gpu/bench.py --paper-batch t5-small
 ```
 
 `--paper-batch` selects the paper's per-model batch sizes (about 70% of VRAM),
@@ -457,9 +464,8 @@ comparable memory.
 To keep a trace and analyse it separately, or to compare two runs:
 
 ```bash
-PYTHONPATH=$PWD python ../artifact/gpu/bench.py \
-    --save-traces /tmp/gm-traces --runs 7 t5-small
-python ../artifact/gpu/from_trace.py --dir /tmp/gm-traces
+python artifact/gpu/bench.py --save-traces /tmp/gm-traces --runs 7 t5-small
+python artifact/gpu/from_trace.py --dir /tmp/gm-traces
 ```
 
 [`gpu/from_trace.py`](gpu/from_trace.py) reads a profiler trace pair and reports
@@ -490,7 +496,7 @@ in the header of that file.
 | `gpu/bench.py` | The benchmark `run_reproducible.sh` drives. Builds each model from real pretrained weights, measures through the PyTorch profiler, and gives each arm a private TorchInductor cache. `--count` reports break counts, `--json` emits machine-readable results, `--paper-batch` selects the paper's batch sizes, `--save-traces` writes traces for `from_trace.py`. |
 | `gpu/from_trace.py` | Reports cold start, steady state and CUDA-graph launches from a profiler trace pair written by `bench.py --save-traces`. The arithmetic half of the measurement, separated so it can be checked independently of the timing run. |
 
-The harness itself is [`../jac/paper_eval/`](../jac/paper_eval/README.md):
+The harness itself is [`../paper_eval/`](../paper_eval/README.md):
 `registry.py` (per-model builder plus transform scope), `run_eval.py` (two-arm
 runner), `entry.py` (the measurement program, run under `jac run`),
 `run_fullgraph.py` (C4), `run_why.py` and `why.py` (per-break cause reporting).
@@ -555,8 +561,13 @@ from a small random-weight config; Phi-4-mini is 2 layers with hidden size 128.
 the same input, so the `output_ok` comparison on that row means nothing.
 
 **`import jaclang` resolves to a pip-installed jaclang.** Any released
-`jaclang` on PyPI predates GraphMend. Always run with `PYTHONPATH=<repo>/jac`
-so this repository's source wins.
+`jaclang` on PyPI predates GraphMend. The harness puts `jaseci/jac` first on
+the subprocess `PYTHONPATH` so the patched toolchain wins; if you run the
+toolchain by hand, do the same.
+
+**`no jaclang toolchain at .../jaseci/jac` or `has no GraphMend passes`.**
+`scripts/setup.sh` has not been run, or the submodule was not initialised.
+Run `git submodule update --init && bash scripts/setup.sh`.
 
 **The first run is very slow and looks hung.** Expected. The cold Jac compiler
 bootstrap plus claiming and recompiling imported modeling code is minutes, not

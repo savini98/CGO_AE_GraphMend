@@ -22,11 +22,40 @@ Models run unmodified: `jac run model.py` in place of `python model.py`.
 **Start here, then read [`artifact/README.md`](artifact/README.md)**, which is
 the artifact guide, the claim-to-command mapping, and the measured results.
 
+## How this artifact is put together
+
+The compiler is not vendored here. The artifact ships the upstream toolchain as
+a frozen submodule plus the diff that makes it GraphMend:
+
+| | |
+|---|---|
+| [`jaseci/`](jaseci) | Upstream `jaseci-labs/jaseci`, a git submodule pinned to `e2b6b9f4bdec510622410f046c8bd5427980c33f` (jaclang 0.36.1) |
+| [`patches/graphmend.patch`](patches/graphmend.patch) | Everything GraphMend adds: 203 files, 166 of them new, 0 deletions |
+| [`scripts/setup.sh`](scripts/setup.sh) | Checks out the pin, applies the patch, fetches the typeshed stubs. Idempotent |
+
+The split is the point. The patch **is** the contribution, and it is readable:
+163 of the 166 new files are the GraphMend passes and their tests, and the 37
+modified files are the integration points in the compiler driver, the pass
+schedule, the Python front end, the project config and the runtime. A vendored
+copy of a 4,700-file compiler tells a reviewer none of that.
+
 ## Quick start
 
 ```bash
+git clone --recurse-submodules <url> && cd CGO_AE_GraphMend
 docker build -f artifact/Dockerfile.cpu -t graphmend-cpu .   # ~5 min
 docker run --rm graphmend-cpu
+```
+
+`--recurse-submodules` matters: without it `jaseci/` is empty and the build
+fails at `COPY jaseci`. An existing clone is fixed with
+`git submodule update --init`.
+
+Natively, without Docker:
+
+```bash
+bash scripts/setup.sh        # submodule + patch + typeshed stubs
+bash artifact/run_all.sh     # 4 rule suites + 5 models
 ```
 
 **Give Docker at least 12 GB of memory.** `Phi-4-mini-instruct` peaks near
@@ -42,7 +71,7 @@ The full 21-row offline sweep, which the default run does not include:
 
 ```bash
 docker run --rm --entrypoint bash graphmend-cpu \
-  -lc 'cd /opt/jaseci/jac && python -m paper_eval.run_eval'
+  -lc 'cd /opt/artifact && python -m paper_eval.run_eval'
 ```
 
 ## What this artifact establishes
@@ -117,22 +146,22 @@ will not land on Table 2's numbers and is not meant to.
 | [`artifact/`](artifact/) | The artifact-evaluation package: guide, results, appendix, Dockerfiles, one-command runner |
 | [`artifact/run_all.sh`](artifact/run_all.sh) | Kick the tires: PASS/FAIL per check, non-zero exit on failure |
 | [`artifact/gpu/run_reproducible.sh`](artifact/gpu/run_reproducible.sh) | The GPU counterpart: measures latency on your own card, gates on the mechanism, non-zero exit on failure |
-| [`jac/`](jac/) | The jaclang toolchain, including the GraphMend passes |
-| [`jac/jaclang/compiler/passes/graphmend/`](jac/jaclang/compiler/passes/graphmend/) | The three transformation rules and their legality analysis |
-| [`jac/paper_eval/`](jac/paper_eval/) | The reproduction harness: per-model builders, the two-arm runner, the measurement entry program |
-| [`jac/tests/compiler/passes/`](jac/tests/compiler/passes/) | The rule-level graph-count suites |
+| [`jaseci/`](jaseci) | Upstream jaclang toolchain, submodule pinned to `e2b6b9f4b` |
+| [`patches/graphmend.patch`](patches/graphmend.patch) | The GraphMend diff against that commit: the passes, their integration points, and the rule-level test suites |
+| [`scripts/setup.sh`](scripts/setup.sh) | Assembles the two into a working toolchain |
+| [`paper_eval/`](paper_eval/) | The reproduction harness: per-model builders, the two-arm runner, the measurement entry program |
 
 ## Requirements
 
 Docker is the supported path and pins everything. To run without it you need
 Python 3.13, `torch==2.12.1`, `transformers==4.52.4`, `numpy==2.4.6` and
-`torchvision==0.27.1`, plus the typeshed stubs, which are gitignored and are
-materialized by:
+`torchvision==0.27.1`, plus `git` for the submodule and the patch. Then:
 
 ```bash
-python artifact/fetch_typeshed.py jac
+bash scripts/setup.sh
 ```
 
+That also materializes the typeshed stdlib stubs, which are gitignored.
 Without them no Jac compilation works at all, and the failure appears as
 `TypeshedUnavailableError` on the first real compile rather than at import.
 

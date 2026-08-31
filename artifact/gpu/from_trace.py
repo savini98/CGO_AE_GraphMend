@@ -9,10 +9,9 @@ that pair and reports the numbers. Splitting them means the timing run and the
 arithmetic over it can be checked separately, and that a trace kept from an
 earlier run can be re-analysed without re-running the model:
 
-    cd jac
-    PYTHONPATH=$PWD python ../artifact/gpu/bench.py \
-        --save-traces /tmp/gm-traces --runs 7 t5-small MoLFormer-XL-both10pct
-    python ../artifact/gpu/from_trace.py --dir /tmp/gm-traces
+    python artifact/gpu/bench.py --save-traces /tmp/gm-traces --runs 7 \
+        t5-small MoLFormer-XL-both10pct
+    python artifact/gpu/from_trace.py --dir /tmp/gm-traces
 
 THE METRIC. A compiled region emits a `Torch-Compiled Region: N/M` marker each
 time it executes. The interval between consecutive markers for the FIRST region

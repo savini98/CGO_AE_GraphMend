@@ -46,8 +46,9 @@ out of scope.
   `[Where]`, `[Defer]`) applied to PyTorch model code claimed at import time.
 - **Program:** jaclang compiler (this branch's source); PyTorch 2.12.1;
   Hugging Face transformers 4.52.4.
-- **Compilation:** the toolchain is used directly from source on `PYTHONPATH`;
-  it declares no runtime PyPI dependencies. No Zig or LLVM build is needed for
+- **Compilation:** the toolchain is upstream jaclang at a pinned commit plus
+  `patches/graphmend.patch`, used directly from source on `PYTHONPATH`; it
+  declares no runtime PyPI dependencies. No Zig or LLVM build is needed for
   these experiments.
 - **Transformations:** GraphMend, enabled by `[run] graphmend = true` (default)
   plus `[run] graphmend_claim_imports = true` (**not** default).
@@ -87,7 +88,8 @@ out of scope.
 - **Time to complete experiments:** minutes for the kick-the-tires path,
   roughly 1.5 to 3 hours for the 21-row offline sweep on a cold cache
   (estimated).
-- **Publicly available:** {{PUBLIC_REPO_URL}}, commit {{COMMIT_HASH}}.
+- **Publicly available:** {{PUBLIC_REPO_URL}}, commit {{COMMIT_HASH}};
+  toolchain submodule pinned at `e2b6b9f4bdec510622410f046c8bd5427980c33f`.
 - **Code licenses:** MIT.
 - **Data licenses:** not applicable; no data set is distributed.
 - **Workflow framework used:** none; plain shell and Python.
@@ -98,8 +100,18 @@ out of scope.
 ### A.3.1 How to access
 
 {{PUBLIC_REPO_URL}} at commit {{COMMIT_HASH}}; archived at {{ARCHIVAL_DOI}}.
-The artifact package is the `artifact/` directory; the reproduction harness is
-`jac/paper_eval/`, whose README is the detailed technical companion.
+Clone with `--recurse-submodules`. The artifact package is the `artifact/`
+directory and the reproduction harness is `paper_eval/`, whose README is the
+detailed technical companion.
+
+The compiler is not vendored. `jaseci/` is upstream `jaseci-labs/jaseci` as a
+git submodule frozen at `e2b6b9f4bdec510622410f046c8bd5427980c33f` (jaclang
+0.36.1), and `patches/graphmend.patch` is everything GraphMend adds to it: 203
+files, 166 of them new, no deletions. `scripts/setup.sh` applies the patch and
+fetches the typeshed stubs, and is idempotent. The patch is therefore a direct
+statement of the contribution, and `git -C jaseci diff` after setup is another
+way to read it. The archival deposit is a flattened tree with the submodule
+materialized, so it does not depend on the submodule remaining reachable.
 
 ### A.3.2 Hardware dependencies
 
@@ -140,6 +152,7 @@ which uses full pretrained models, and fix rate is the compared quantity.
 ## A.4 Installation
 
 ```
+git clone --recurse-submodules {{PUBLIC_REPO_URL}} && cd <repo>
 docker build -f artifact/Dockerfile.cpu -t graphmend-cpu .
 docker run --rm graphmend-cpu
 ```
@@ -147,13 +160,15 @@ docker run --rm graphmend-cpu
 Or natively, with torch 2.12.1 and transformers 4.52.4 installed:
 
 ```
-git clone {{PUBLIC_REPO_URL}} && cd <repo>
+git clone --recurse-submodules {{PUBLIC_REPO_URL}} && cd <repo>
+bash scripts/setup.sh
 bash artifact/run_all.sh
 ```
 
-Nothing is installed for the toolchain itself: `run_all.sh` puts the branch's
-`jac/` directory on `PYTHONPATH`, which must win over any pip-installed
-`jaclang` (every released `jaclang` predates GraphMend).
+Nothing is pip-installed for the toolchain itself: `setup.sh` assembles it from
+the pinned submodule and the patch, and the harness puts `jaseci/jac` first on
+the subprocess `PYTHONPATH`, which must win over any pip-installed `jaclang`
+(every released `jaclang` predates GraphMend).
 
 ## A.5 Experiment workflow
 
@@ -181,7 +196,7 @@ own script.
 
 ## A.6 Evaluation and expected results
 
-From the repository's `jac/` directory with `PYTHONPATH=$PWD`:
+From the repository root, after `bash scripts/setup.sh`:
 
 | Claim | Command | Expected |
 |---|---|---|

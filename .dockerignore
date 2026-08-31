@@ -1,9 +1,16 @@
-# .dockerignore for the jaseci repo root. Keeps the docker build context
-# bounded - without this, `.git` (~860MB) + caches push past 2GB and the
-# build times out before any layer runs.
+# .dockerignore for the artifact repository. Keeps the docker build context
+# bounded - without this, `.git` plus the submodule's history push the context
+# past 2GB and the build times out before any layer runs.
+#
+# Note that dropping `.git` also makes the copied `jaseci/` a plain directory
+# rather than a git checkout. scripts/setup.sh handles that: it reports the
+# pinned commit as assumed rather than verified, and relies on the patch
+# applying cleanly, which it only does against the pinned tree.
 
 # Git + CI + editor + OS metadata
 .git
+**/.git
+.gitmodules
 .gitignore
 .gitattributes
 .github

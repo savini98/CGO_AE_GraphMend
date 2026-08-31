@@ -94,7 +94,7 @@ def main(argv):
     # per git worktree, and if that link resolves it is a perfectly good set of
     # stubs -- the fetch is skipped and nothing is downloaded. The case this
     # does NOT accept is the same symlink copied somewhere its target does not
-    # exist, which is exactly what `COPY jac /opt/jaseci/jac` produces from such
+    # exist, which is exactly what `COPY jaseci /opt/artifact/jaseci` produces from such
     # a checkout: an absolute link into the developer's home directory, dangling
     # inside the image. That resolves to nothing, so the fetch proceeds and
     # replaces it below.
