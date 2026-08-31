@@ -269,8 +269,13 @@ def build(key, device):
         repo, clsname, _expected = _BART_FAMILY[key]
         cfg = transformers.AutoConfig.from_pretrained(repo)
         m = _load_weights(getattr(transformers, clsname)(cfg), repo)
-        if device == "cuda":
-            m = m.half()
+        # fp16 ALWAYS, not just on CUDA. The reference selects it by device
+        # (`torch.float16 if torch.cuda.is_available() else torch.float32`),
+        # but what actually determines the break count is the dtype itself,
+        # because the guard Dynamo folds is `dtype == torch.float16`. Measured
+        # on CPU: fp32 gives 3 breaks and fp16 gives 7, the same as on a GPU.
+        # Pinning it here is what lets this row reproduce Table 2 without one.
+        m = m.half()
         b, s = _bs(4, 128)
         vocab = getattr(cfg, "vocab_size", 32000)
         # The batch shape matters as much as the dtype here. The reference

@@ -59,12 +59,16 @@ TABLE2 = {
     "moe-minicpm-x4-base": (15, 0), "stella-en-400M-v5": (4, 0),
 }
 
-# Rows the CPU harness does not reproduce, routed to the reference-fidelity GPU
-# build in gpu/bench.py. The value is the key bench.py knows them by.
-GPU_ROWS = {
+# Rows the small-config harness does not reproduce, routed to the
+# reference-fidelity build in gpu/bench.py. The value is the key bench.py knows
+# them by. NONE OF THESE NEED A GPU: what makes them match is the dtype and the
+# batch, not the device. Measured on CPU, bart-base reads 3 breaks in fp32 and 7
+# in fp16, and grounding-dino reads 17 with the processor batch.
+REF_BUILD = {
     "bart": "bart-large-cnn", "bart-base": "bart-base",
     "rebel-large": "rebel-large", "opus-mt-fr-en": "opus-mt-fr-en",
     "grounding-dino": "grounding-dino-tiny",
+    "grounding-dino-base": "grounding-dino-base",
 }
 
 NETWORK_ROWS = {"MoLFormer-XL-both10pct", "Florence-2", "Qwen-Audio-Chat",
@@ -104,7 +108,7 @@ def run_gpu(keys, jac):
                          "gpu", "bench.py")
     env = dict(os.environ, PYTHONPATH=jac, PYTHONUNBUFFERED="1")
     p = subprocess.run([sys.executable, bench, "--count", "--json",
-                        *[GPU_ROWS[k] for k in keys]],
+                        *[REF_BUILD[k] for k in keys]],
                        capture_output=True, text=True, cwd=jac, env=env)
     out = {}
     for line in reversed(p.stdout.strip().splitlines()):
@@ -112,7 +116,7 @@ def run_gpu(keys, jac):
             data = json.loads(line)
         except (ValueError, TypeError):
             continue
-        inv = {v: k for k, v in GPU_ROWS.items()}
+        inv = {v: k for k, v in REF_BUILD.items()}
         for bench_key, r in data.items():
             if bench_key in inv and not r.get("off", {}).get("error"):
                 out[inv[bench_key]] = (r["off"]["breaks"], r["on"]["breaks"])
@@ -123,33 +127,41 @@ def run_gpu(keys, jac):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cpu-only", action="store_true",
-                    help="skip rows that need a GPU; they are reported as "
-                         "SKIP rather than measured with a build that does "
-                         "not match the paper")
+                    help="skip the one row that genuinely requires CUDA "
+                         "(stella-en-400M-v5, which needs xformers). Every "
+                         "other row runs on CPU.")
     ap.add_argument("--offline", action="store_true",
                     help="skip rows that download weights or remote code")
+    ap.add_argument("models", nargs="*",
+                    help="restrict to these rows (default: all of Table 2). "
+                         "Useful for a quick check before committing to the "
+                         "full sweep, which compiles every model twice.")
     o = ap.parse_args()
+    unknown = [m for m in o.models if m not in TABLE2]
+    if unknown:
+        sys.exit(f"not Table 2 rows: {', '.join(unknown)}\n"
+                 f"known: {', '.join(sorted(TABLE2))}")
 
     jac = _jac_dir()
     if not os.path.isdir(os.path.join(jac, "paper_eval")):
         sys.exit(f"cannot find the harness at {jac}/paper_eval")
 
-    skip = set()
+    skip = set(TABLE2) - set(o.models) if o.models else set()
     if o.offline:
         skip |= NETWORK_ROWS
     if o.cpu_only:
-        skip |= set(GPU_ROWS) | GPU_ONLY_ROWS
+        skip |= GPU_ONLY_ROWS
 
-    gpu_keys = [k for k in GPU_ROWS if k not in skip]
-    cpu_keys = [k for k in TABLE2 if k not in skip and k not in GPU_ROWS]
+    ref_keys = [k for k in REF_BUILD if k not in skip]
+    cpu_keys = [k for k in TABLE2 if k not in skip and k not in REF_BUILD]
 
-    print(f"routing {len(cpu_keys)} row(s) to the CPU harness and "
-          f"{len(gpu_keys)} to the reference GPU build")
+    print(f"routing {len(cpu_keys)} row(s) to the small-config harness and "
+          f"{len(ref_keys)} to the reference-fidelity build")
     print("this takes a while: every row compiles the model twice\n")
 
     got = {}
     got.update(run_cpu(cpu_keys, jac))
-    got.update({k: v for k, v in run_gpu(gpu_keys, jac).items()})
+    got.update({k: v for k, v in run_gpu(ref_keys, jac).items()})
 
     print(f"{'model':32s} {'before':>7s} {'after':>6s} {'fixed':>6s} "
           f"{'paper':>7s} {'paper':>6s}  via     verdict")
@@ -157,7 +169,7 @@ def main():
     bad = tot_b = tot_a = p_tot_b = 0
     for key in sorted(TABLE2):
         pb, pr = TABLE2[key]
-        via = "gpu" if key in GPU_ROWS else "cpu"
+        via = "ref" if key in REF_BUILD else "small"
         if key in skip:
             print(f"{key:32s} {'-':>7s} {'-':>6s} {'-':>6s} "
                   f"{pb:7d} {pr:5d}%  {via:6s}  SKIP")

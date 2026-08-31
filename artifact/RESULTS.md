@@ -141,9 +141,17 @@ deviation expressed as a rate: Table 2 counts a full pretrained model where
 this harness builds a small config, so the absolute counts differ and the
 percentage moves with them. `[Trap]` fires as expected on both sizes.
 
-**Every row that the reference measures now reproduces Table 2's break count
-exactly.** `python artifact/table2_breaks.py` runs the whole column in one
-command and exits non-zero on any mismatch.
+**Every row that the reference measures reproduces Table 2's break count
+exactly, and none of it needs a GPU.** `python artifact/table2_breaks.py` runs
+the whole column in one command and exits non-zero on any mismatch. Verified
+end to end with the GPU hidden (`CUDA_VISIBLE_DEVICES=""`): bart-base 7 -> 0,
+opus-mt-fr-en 6 -> 0, grounding-dino 17 -> 7 and t5-small 3 -> 0, all PASS.
+
+That the reference selects fp16 by device
+(`torch.float16 if torch.cuda.is_available() else torch.float32`) made it look
+like a GPU was required. It is not: what sets the count is the dtype itself,
+because the guard Dynamo folds is `dtype == torch.float16`. On CPU, bart-base
+reads 3 breaks in fp32 and 7 in fp16.
 
 A break count is a property of the code TorchDynamo actually traces, so it
 depends on how the model is built and what it is fed. Most rows are insensitive
@@ -151,7 +159,7 @@ to that and the fp32 small-config CPU harness reproduces Table 2 exactly. Five
 are sensitive, and each was diagnosed against the reference scripts rather than
 guessed:
 
-| model | fp32 CPU row | reference-fidelity GPU row | Table 2 |
+| model | small-config row | reference-fidelity row | Table 2 |
 |---|---|---|---|
 | bart-base | 3 | **7 -> 0** | 7 |
 | bart-large-cnn | 3 | **7 -> 0** | 7 |
