@@ -124,16 +124,18 @@ if not data:
     sys.exit(1)
 bad = 0
 for key, r in data.items():
-    if key not in want:
-        print(f"  FAIL  {key}: no expected break count recorded for this model")
-        bad = 1
-        continue
-    wb, wa = want[key]
     if r["off"].get("error") or r["on"].get("error"):
         print(f"  FAIL  {key}: {r['off'].get('error') or r['on'].get('error')}")
         bad = 1
         continue
     gb, ga = r["off"]["breaks"], r["on"]["breaks"]
+    if key not in want:
+        # A model with no recorded expectation is measured and reported rather
+        # than gated, so GM_GPU_MODELS can name any registry key without the
+        # run turning into a failure about this script's coverage.
+        print(f"  ....  {key}: {gb} -> {ga} breaks (not gated, no recorded expectation)")
+        continue
+    wb, wa = want[key]
     if (gb, ga) != (wb, wa):
         print(f"  FAIL  {key}: {gb} -> {ga} breaks, expected {wb} -> {wa}")
         bad = 1
@@ -151,10 +153,9 @@ PY
 # difference then is noise. It is exact.
 #
 # The cold-start ratio is a timing, so it is gated with a wide threshold rather
-# than an expected value. Measured on an RTX 3090 the three models give 3.29x,
-# 2.22x and 5.92x on the conservative compile-subtracted metric; the gate below
-# is 1.5x, which fails a run where the transform did nothing while tolerating a
-# slower or busier machine.
+# than an expected value: 1.5x, which fails a run where the transform did
+# nothing while tolerating a card slower, faster or busier than ours. The
+# magnitude a given GPU produces is reported, not checked.
 # ---------------------------------------------------------------------------
 rule
 echo "STEP 2  cold start and CUDA-graph launches"
@@ -169,8 +170,14 @@ tail -1 "$TIME_JSON" > "$TIME_JSON.line" 2>/dev/null
 
 "$PYTHON" - "$TIME_JSON.line" <<'PY'
 import json, sys
+# Cold start is a timing, so it gets a wide floor rather than an expected
+# value: it fails a run where nothing was transformed while tolerating a slower
+# or busier machine than the one these were developed on.
 COLD_MIN = 1.5
-want_launches = {
+# For reporting only. The launch gate below is structural -- the two arms must
+# differ and the on-arm must reach 1 -- so a model absent from this table is
+# still fully checked.
+known_launches = {
     "t5-small":               (4, 1),
     "MoLFormer-XL-both10pct": (50, 1),
     "Phi-4-mini-instruct":    (5, 1),
@@ -185,10 +192,6 @@ if not data:
     sys.exit(1)
 bad = 0
 for key, r in data.items():
-    if key not in want_launches:
-        print(f"  FAIL  {key}: no expected launch count recorded for this model")
-        bad = 1
-        continue
     if "cold_ms" not in r.get("off", {}) or "cold_ms" not in r.get("on", {}):
         print(f"  FAIL  {key}: no measurement "
               f"(off={r.get('off', {}).get('error')})")
@@ -208,7 +211,11 @@ for key, r in data.items():
         print(f"  FAIL  {key}: launches off={lo} on={ln}, expected on=1")
         bad = 1
     else:
-        print(f"  PASS  {key}: launches {lo} -> {ln}")
+        note = ""
+        if key in known_launches and (lo, ln) != known_launches[key]:
+            wl, _ = known_launches[key]
+            note = f" (off-arm was {wl} on our RTX 3090; a different card can split differently)"
+        print(f"  PASS  {key}: launches {lo} -> {ln}{note}")
 
     raw = off["cold_window_ms"] / on["cold_window_ms"]
     cons = off["cold_ms"] / on["cold_ms"]

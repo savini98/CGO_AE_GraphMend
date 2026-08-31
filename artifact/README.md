@@ -19,7 +19,7 @@ output-correctness claims.
 - [Environment](#environment)
 - [Claim to command to expected output](#claim-to-command-to-expected-output)
 - [Measured results](#measured-results)
-- [Latency, from the recorded traces (optional)](#latency-from-the-recorded-traces-optional)
+- [Latency on your own GPU (optional)](#latency-on-your-own-gpu-optional)
 - [Files in this directory](#files-in-this-directory)
 - [Troubleshooting](#troubleshooting)
 
@@ -44,11 +44,11 @@ independent mechanism: a forward pass that is one FX graph instead of B+1 does
 not re-enter the interpreter, does not synchronize, and replays as one CUDA
 graph. We treat them as supporting evidence rather than as claims a reviewer
 must reproduce, because they require the specific NVIDIA hardware of §5. They
-are covered two ways in
-[Latency, from the recorded traces](#latency-from-the-recorded-traces-optional):
-the profiler traces the published numbers were read from are shipped here and
-can be re-analysed with **no GPU at all**, and `gpu/run_reproducible.sh`
-re-measures on an NVIDIA GPU for reviewers who have one.
+are measured, on the reviewer's own hardware, by
+[`gpu/run_reproducible.sh`](#latency-on-your-own-gpu-optional). We ship no
+recorded traces and no saved results: what that script gates on is the
+mechanism, which is hardware-independent, rather than a magnitude, which is
+not.
 
 ## What it does not cover
 
@@ -395,78 +395,76 @@ well as on any failure.
 
 ---
 
-## Latency, from the recorded traces (optional)
+## Latency on your own GPU (optional)
 
 This section is supporting evidence, not a claim we ask a reviewer to
-reproduce. §5.2 to §5.4 depend on the specific NVIDIA hardware of §5, and the
-numbers a different GPU produces will differ.
+reproduce. The speedups of §5.2 to §5.4 follow from eliminating breaks rather
+than standing on their own, and their magnitude depends on the card, the
+driver and the batch size, so a run on hardware other than the paper's RTX
+3090 / A40 / H100 will not land on Table 2's numbers and is not meant to.
 
-The cold-start and steady-state numbers in Table 2 were read from PyTorch
-profiler traces. Those traces are shipped here, so the published values can be
-checked directly, with **no GPU, no model download and no network**:
-
-```bash
-python artifact/gpu/from_trace.py --dir artifact/traces/3090
-```
-
-[`gpu/from_trace.py`](gpu/from_trace.py) takes a trace pair and reports cold
-start, steady state and CUDA-graph launches per forward. Against the 3090
-traces it reproduces Table 2's cold-start column:
-
-| Model | Cold start, Table 2 | Re-derived | CUDA-graph launches |
-|---|---|---|---|
-| MoLFormer-XL | 24.71x | **24.71x** | 50 -> 1 |
-| bart-large-cnn | 21.07x | **21.07x** | 30 -> 1 |
-| Florence-2-large | 20.95x | **20.95x** | 30 -> 1 |
-| rebel-large | 19.86x | **19.86x** | 30 -> 1 |
-| opus-mt-fr-en | 13.16x | **13.16x** | 17 -> 1 |
-| bart-base | 11.87x | **11.87x** | 18 -> 1 |
-| layoutlmv3-base | 6.78x | **6.78x** | - |
-| grounding-dino-tiny | 5.20x | **5.20x** | 79 -> 14 |
-| chronos-bolt-small | 4.64x | **4.64x** | 5 -> 1 |
-| t5-small | 3.49x | **3.49x** | 4 -> 1 |
-| flan-t5-large | 3.27x | **3.27x** | 4 -> 1 |
-| blenderbot-400M | 3.21x | **3.21x** | 4 -> 1 |
-
-Cold start matches to two decimals on 22 of the 24 shipped trace pairs, and the
-CUDA-graph launch counts are exact. The launch column is the mechanism in one
-line: a forward pass fragmented into 50 CUDA-graph launches becomes one.
-
-Steady state is not tabulated against Table 2 here. It is a much smaller effect
-than cold start and is sensitive to batch size, so re-deriving it from a trace
-recorded at one batch size and comparing against a column measured at another
-is not a like-for-like check. `from_trace.py` prints it per pair, and
-`gpu/run_reproducible.sh` re-measures it on device with both arms pinned to the
-same batch.
-
-Two things are worth knowing before re-measuring.
-
-**Read the `_trace_` profile.** Our measurement scripts write two profiles per
-arm, `profile_<arm>.json` and `<model>_trace_<arm>_<stamp>.json`, taken at
-different points in the run. The published numbers are the second, and on
-MoLFormer-XL the two disagree by roughly 4x. Reading the first is the easiest
-way to conclude the claim does not reproduce when it does.
-
-**Both arms must use the same batch size and the same TorchInductor cache
-state.** The reference runs auto-detect batch from free GPU memory and the two
-arms can land on different values, which compares unequal work.
-[`gpu/bench.py`](gpu/bench.py) gives each arm a private
-`TORCHINDUCTOR_CACHE_DIR` for the same reason, and `--paper-batch` selects the
-paper's per-model batch sizes.
-
-### Re-measuring on an NVIDIA GPU
+Everything here is measured by the reviewer. We ship no recorded traces and no
+saved results: an output file we produced is an assertion, not evidence, and a
+reviewer cannot tell one from a fabrication. What is worth checking is the
+mechanism, and the mechanism is hardware-independent.
 
 ```bash
 bash artifact/gpu/run_reproducible.sh
 ```
 
-This carries fixed expected values and exits non-zero on failure. On an RTX
-3090 it reports break counts and CUDA-graph launches matching exactly
-(MoLFormer-XL 5 -> 0 breaks, 50 -> 1 launches) and cold start at 20.57x against
-a published 24.71x; the residual is ordinary run-to-run variation in how much
-compilation lands inside the first region window. `gpu/bench.py --save-traces`
-writes traces in the same format, so `from_trace.py` runs over your own
-measurement rather than over ours.
+Needs one CUDA device. It builds each model from **real pretrained weights**,
+compiles both arms with a private TorchInductor cache each so that the second
+arm's cold start is genuinely cold, and gates on three things:
+
+| Check | Gate | Why it is the right gate |
+|---|---|---|
+| Graph breaks, off vs on | exact equality (t5-small 3 -> 0, MoLFormer-XL 5 -> 0, Phi-4-mini 5 -> 0) | Structural. Same quantity `run_all.sh` measures on CPU, repeated on the device the timings come from. |
+| CUDA-graph launches per forward | on-arm must be 1, and the two arms must differ | This is the mechanism. Identical launch counts mean the transform never reached the compiled program, and any timing difference is then noise. |
+| Cold start | ratio above 1.5x | A timing, so a wide floor rather than an expected value: it fails a run where nothing was transformed while tolerating a slower or busier machine than ours. |
+
+Steady state and throughput are printed but **not** gated. Both are small
+effects next to cold start and both move with the GPU and the batch size, so a
+fixed threshold would fail an honest run on different hardware.
+
+To point it at other models, or a subset, so the pretrained download is smaller:
+
+```bash
+GM_GPU_MODELS="t5-small MoLFormer-XL-both10pct" bash artifact/gpu/run_reproducible.sh
+```
+
+Any key from the registry works. Models without a recorded expected break count
+are measured and reported rather than gated, so the run stays honest about which
+rows it is actually checking.
+
+### Looking at the numbers directly
+
+[`gpu/bench.py`](gpu/bench.py) underlies the script above and can be called on
+one model. It reports both readings of cold start side by side -- the raw
+region-window ratio, which is Table 2's metric, and a compile-subtracted figure
+that excludes `backend_compile` spans from both arms -- rather than picking one:
+
+```bash
+cd jac
+PYTHONPATH=$PWD python ../artifact/gpu/bench.py t5-small
+PYTHONPATH=$PWD python ../artifact/gpu/bench.py --count t5-small     # breaks only
+PYTHONPATH=$PWD python ../artifact/gpu/bench.py --paper-batch t5-small
+```
+
+`--paper-batch` selects the paper's per-model batch sizes (about 70% of VRAM),
+which is the configuration Table 2 was measured at and which needs a card with
+comparable memory.
+
+To keep a trace and analyse it separately, or to compare two runs:
+
+```bash
+PYTHONPATH=$PWD python ../artifact/gpu/bench.py \
+    --save-traces /tmp/gm-traces --runs 7 t5-small
+python ../artifact/gpu/from_trace.py --dir /tmp/gm-traces
+```
+
+[`gpu/from_trace.py`](gpu/from_trace.py) reads a profiler trace pair and reports
+cold, steady state and CUDA-graph launches. It is the arithmetic half of the
+measurement, separated so it can be checked independently of the timing run.
 
 [`Dockerfile.cuda`](Dockerfile.cuda) pins the GPU environment. It does not need
 the NVIDIA Container Toolkit: torch's cu126 wheel vendors its own CUDA runtime,
@@ -488,10 +486,9 @@ in the header of that file.
 | `run_all.sh` | One-command kick-the-tires path, CPU only, prints PASS/FAIL and exits non-zero on failure. |
 | `jac.toml` | Project config that enables `graphmend_claim_imports`, so hand-typed commands in this directory behave like the harness. |
 | `minimal_example.py` | Smallest correct own-script template. Demonstrates both gotchas. Run it with `jac run`, never with `python`. |
-| `gpu/from_trace.py` | Re-derives the published cold, steady-state and launch numbers from a profiler trace pair. **Needs no GPU and no model download.** |
-| `gpu/bench.py` | The benchmark `run_reproducible.sh` drives. Builds each model from real pretrained weights, measures through the PyTorch profiler, and gives each arm a private TorchInductor cache. `--count` reports break counts, `--json` emits machine-readable results, `--save-traces` writes traces for `from_trace.py`. |
-| `gpu/run_reproducible.sh` | The GPU counterpart of `run_all.sh`: fixed expected values, PASS/FAIL, non-zero exit on failure. |
-| `traces/3090/` | The 24 profiler trace pairs the paper's latency numbers were read from, gzipped (9.9 MB). See [`traces/README.md`](traces/README.md). |
+| `gpu/run_reproducible.sh` | The GPU counterpart of `run_all.sh`: measures latency on the reviewer's own card, gates on the hardware-independent mechanism, PASS/FAIL, non-zero exit on failure. |
+| `gpu/bench.py` | The benchmark `run_reproducible.sh` drives. Builds each model from real pretrained weights, measures through the PyTorch profiler, and gives each arm a private TorchInductor cache. `--count` reports break counts, `--json` emits machine-readable results, `--paper-batch` selects the paper's batch sizes, `--save-traces` writes traces for `from_trace.py`. |
+| `gpu/from_trace.py` | Reports cold start, steady state and CUDA-graph launches from a profiler trace pair written by `bench.py --save-traces`. The arithmetic half of the measurement, separated so it can be checked independently of the timing run. |
 
 The harness itself is [`../jac/paper_eval/`](../jac/paper_eval/README.md):
 `registry.py` (per-model builder plus transform scope), `run_eval.py` (two-arm

@@ -26,14 +26,14 @@ count and on a SHA-256 fingerprint of the output tensor. A container image is
 provided with the environment pinned, and a single `run_all.sh` gives a
 pass/fail kick-the-tires result.
 
-The latency claims are covered two ways. The paper's cold-start and
-steady-state numbers were read from PyTorch profiler traces, and those traces
-are shipped here, so `gpu/from_trace.py` re-derives the published values
-**with no GPU, no model download and no network**. Independently,
-`gpu/run_reproducible.sh` re-measures on an NVIDIA GPU: verified on an RTX
-3090, break counts and CUDA-graph launch counts match exactly, and cold start
-reproduces. `bench.py --save-traces` writes a reviewer's own traces in the same
-format, so the same analysis runs over their measurement rather than ours.
+The latency results of Sections 5.2 to 5.4 follow from break elimination rather
+than standing on their own, and their magnitude depends on the card, so they
+are supporting evidence rather than claims a reviewer must reproduce. No
+recorded traces or saved results are shipped: `gpu/run_reproducible.sh`
+measures on the reviewer's own NVIDIA GPU and gates on what is
+hardware-independent -- graph breaks going to zero and the CUDA-graph launch
+count per forward collapsing to one -- while printing the timings themselves
+rather than gating on them.
 
 The 195-model survey of Section 5 selected the benchmark suite; this artifact
 supports the results measured on the resulting 27 models rather than re-running
@@ -59,9 +59,8 @@ out of scope.
 - **Run-time environment:** Linux or macOS, Python 3.13. A Docker image
   (`artifact/Dockerfile.cpu`) pins everything for the CPU claims;
   `artifact/Dockerfile.cuda` does the same for the GPU claims.
-- **Hardware:** any x86-64 or arm64 CPU for break elimination, correctness,
-  full-graph capture, and for re-deriving the published latency numbers from
-  the shipped traces. Re-measuring latency needs an NVIDIA GPU (verified on an
+- **Hardware:** any x86-64 or arm64 CPU for break elimination, correctness and
+  full-graph capture. Measuring latency needs an NVIDIA GPU (verified on an
   RTX 3090; the paper used RTX 3090 / A40 / H100). **Give Docker at least
   12 GB**: Phi-4-mini peaks near 9.7 GB and is SIGKILLed below that.
 - **Run-time state:** none persisted between runs beyond a compiler cache.
@@ -70,16 +69,16 @@ out of scope.
 - **Metrics:** graph breaks before and after (`breaks = FX graphs - 1`); fix
   rate; output fingerprint equality (SHA-256 of the output tensor, and of the
   greedy-decoded token sequence on generative rows); whether
-  `torch.compile(fullgraph=True)` captures; cold-start and steady-state
-  forward-pass latency from profiler traces, taken as the interval between
-  consecutive `Torch-Compiled Region` markers; CUDA-graph launches per forward;
-  end-to-end throughput.
+  `torch.compile(fullgraph=True)` captures; CUDA-graph launches per forward;
+  and, on a GPU, cold-start and steady-state forward-pass latency taken as the
+  interval between consecutive `Torch-Compiled Region` markers, plus end-to-end
+  throughput.
 - **Output:** a table per model, plus a total. Reference output is in
   `artifact/README.md`.
 - **Experiments:** 4 rule-level graph-count suites (18 tests); 21 offline model
   rows; 6 network model rows; per-break cause reporting; full-graph capture per
-  arm; re-derivation of the published latency numbers from 48 shipped profiler
-  traces; GPU re-measurement of cold start, steady state and throughput.
+  arm; and, on a GPU, measurement of break counts, CUDA-graph launches, cold
+  start, steady state and throughput.
 - **Disk:** the built CPU image is 1.37 GB; allow roughly 5 GB with the build
   cache. The 6 network rows add a few GB of Hub downloads on top.
 - **Time to prepare workflow:** about 5 minutes for the container build on a
@@ -104,8 +103,7 @@ The artifact package is the `artifact/` directory; the reproduction harness is
 
 ### A.3.2 Hardware dependencies
 
-None for break elimination, correctness, full-graph capture, or re-deriving
-the published latency numbers from the shipped profiler traces: any CPU with
+None for break elimination, correctness or full-graph capture: any CPU with
 about 12 GB of RAM and 10 GB of disk. 12 GB rather than 8: Phi-4-mini peaks near
 9.7 GB while GraphMend compiles the imported modeling code, and a smaller
 ceiling SIGKILLs the container. Re-measuring latency needs an NVIDIA GPU;
@@ -220,16 +218,15 @@ on MoLFormer-XL (5 to 0) and grounding-dino (16 to 7).
 The latency results of Sections 5.2 to 5.4 are supporting evidence rather than
 claims a reviewer must reproduce: they follow from break elimination and they
 require the specific NVIDIA hardware of Section 5. They are covered two ways.
-The profiler traces the published numbers were read from are shipped here, so
-`python artifact/gpu/from_trace.py --dir artifact/traces/3090` re-derives Table
-2's cold-start column to two decimals on **22 of the 24** trace pairs, and the
-CUDA-graph launch counts exactly, with **no GPU and no model download**. For
-reviewers with an NVIDIA GPU, `artifact/gpu/run_reproducible.sh` re-measures on
-device with fixed expected values and a real exit status; on an RTX 3090 break
-counts and launch counts match exactly (MoLFormer-XL 5 to 0 breaks, 50 to 1
-launches) and cold start reproduces at 20.57x against a published 24.71x.
-Latency depends on the GPU, so direction and magnitude are what to check rather
-than equality.
+`bash artifact/gpu/run_reproducible.sh` measures both arms on the reviewer's own
+card from real pretrained weights, with a private TorchInductor cache per arm so
+that cold start is genuinely cold. It gates on the hardware-independent part of
+the result -- graph breaks to zero, and CUDA-graph launches per forward
+collapsing to one (t5-small 4 to 1, MoLFormer-XL 50 to 1, Phi-4-mini 5 to 1) --
+with a wide 1.5x floor on cold start rather than an expected value. Steady state
+and throughput are printed but not gated, since both move with the card and the
+batch size. A GPU other than the paper's will not land on Table 2's magnitudes
+and is not expected to.
 
 ## A.7 Experiment customization
 

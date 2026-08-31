@@ -80,19 +80,22 @@ an independent mechanism, and they require the specific NVIDIA hardware of §5.
 We provide them as supporting evidence rather than as claims a reviewer must
 reproduce.
 
-The published cold-start and steady-state numbers were read from PyTorch
-profiler traces, so the traces themselves are shipped here and the strongest
-check needs **no GPU and no model download at all**:
+We ship no recorded traces and no saved results. An output file we produced is
+an assertion in a different file format, not something a reviewer can check, so
+the latency path is a script that measures on the reviewer's own card:
 
 ```bash
-python artifact/gpu/from_trace.py --dir artifact/traces/3090
+bash artifact/gpu/run_reproducible.sh          # needs one CUDA device
 ```
 
-That re-derives Table 2's cold-start column to two decimals on 22 of the 24
-trace pairs, and the CUDA-graph launch counts exactly -- MoLFormer-XL 24.71x and
-50 launches to 1, bart-large-cnn 21.07x and 30 to 1, t5-small 3.49x and 4 to 1.
-For reviewers with an NVIDIA GPU, `artifact/gpu/run_reproducible.sh` re-measures
-on device with fixed expected values and a real exit status.
+It builds each model from real pretrained weights, gives each arm its own
+TorchInductor cache so cold start is genuinely cold, and gates on what is
+hardware-independent: graph breaks going to zero, and the CUDA-graph launch
+count per forward collapsing to one (t5-small 4 -> 1, MoLFormer-XL 50 -> 1,
+Phi-4-mini 5 -> 1). Cold start is gated with a wide 1.5x floor rather than an
+expected value, and steady state and throughput are printed but not gated,
+because their magnitude moves with the card and the batch size. A different GPU
+will not land on Table 2's numbers and is not meant to.
 
 ## What this artifact does not cover
 
@@ -113,8 +116,7 @@ on device with fixed expected values and a real exit status.
 |---|---|
 | [`artifact/`](artifact/) | The artifact-evaluation package: guide, results, appendix, Dockerfiles, one-command runner |
 | [`artifact/run_all.sh`](artifact/run_all.sh) | Kick the tires: PASS/FAIL per check, non-zero exit on failure |
-| [`artifact/gpu/from_trace.py`](artifact/gpu/from_trace.py) | Re-derives the published latency numbers from the shipped profiler traces. No GPU needed |
-| [`artifact/traces/3090/`](artifact/traces/3090/) | The 24 profiler trace pairs the latency numbers were read from |
+| [`artifact/gpu/run_reproducible.sh`](artifact/gpu/run_reproducible.sh) | The GPU counterpart: measures latency on your own card, gates on the mechanism, non-zero exit on failure |
 | [`jac/`](jac/) | The jaclang toolchain, including the GraphMend passes |
 | [`jac/jaclang/compiler/passes/graphmend/`](jac/jaclang/compiler/passes/graphmend/) | The three transformation rules and their legality analysis |
 | [`jac/paper_eval/`](jac/paper_eval/) | The reproduction harness: per-model builders, the two-arm runner, the measurement entry program |

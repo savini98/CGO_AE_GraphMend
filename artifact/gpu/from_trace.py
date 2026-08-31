@@ -1,15 +1,18 @@
-"""Re-derive the paper's cold-start and steady-state numbers from a PyTorch
-profiler trace, without re-running anything on a GPU.
+"""Report cold-start and steady-state latency from a PyTorch profiler trace.
 
     python artifact/gpu/from_trace.py ORIGINAL.json FIXED.json
     python artifact/gpu/from_trace.py --dir path/to/traces        # pair by name
 
-This exists because the paper's latency numbers were read off PyTorch profiler
-traces, and a trace is a durable artifact in a way that a timing run is not. A
-reviewer with the trace files can check the published values exactly, on any
-machine, with no GPU and no model download. Re-running on their own GPU is the
-separate, and weaker, check: it confirms the mechanism but will not land on the
-same numbers, because the numbers depend on the card.
+This is the analysis half of the GPU measurement. `bench.py --save-traces DIR`
+runs both arms and writes a trace pair per model into DIR; this script reads
+that pair and reports the numbers. Splitting them means the timing run and the
+arithmetic over it can be checked separately, and that a trace kept from an
+earlier run can be re-analysed without re-running the model:
+
+    cd jac
+    PYTHONPATH=$PWD python ../artifact/gpu/bench.py \
+        --save-traces /tmp/gm-traces --runs 7 t5-small MoLFormer-XL-both10pct
+    python ../artifact/gpu/from_trace.py --dir /tmp/gm-traces
 
 THE METRIC. A compiled region emits a `Torch-Compiled Region: N/M` marker each
 time it executes. The interval between consecutive markers for the FIRST region
@@ -25,16 +28,23 @@ with B breaks is the compilation and execution of the other B subgraphs. A
 fixed arm with one region has nothing left to do there, which is why its first
 interval is close to its steady state rather than close to the original's.
 
-WHICH TRACE. The reference scripts write two different profiles per arm and
-they do not agree, so the file matters more than it looks:
+WHICH TRACE, if you point this at traces from our own model scripts rather than
+at bench.py output. Those scripts write two different profiles per arm and the
+two do not agree:
 
     profile_<arm>.json                  profile_small_batch(), no warmup
     <model>_trace_<arm>_<stamp>.json    detect_cudagraphs(), after a warmup
 
-The paper's published traces are the second form. Reading the first instead
-understates the ratio by roughly 4x on MoLFormer-XL, which is a very easy way
-to conclude a claim does not reproduce when it does. This script prints the
-whole window sequence so the choice stays visible.
+The paper's numbers are the second form. Reading the first instead understates
+the ratio by roughly 4x on MoLFormer-XL. This script prints the whole window
+sequence so the choice stays visible. Traces written by `bench.py
+--save-traces` use the `_trace_` naming and need no such choice.
+
+WHAT TO EXPECT. Cold start and steady state both depend on the card, the driver
+and the batch size, so a run on a different GPU will not land on the paper's
+numbers and is not meant to. What is hardware-independent, and what
+`run_reproducible.sh` gates on, is the mechanism: graph breaks going to zero and
+the CUDA-graph launch count per forward collapsing to one.
 """
 import argparse
 import gzip
@@ -49,9 +59,8 @@ MARKER_PREFIX = "Torch-Compiled Region:"
 def _events(path):
     """Trace events from a chrome trace, gzipped or not.
 
-    The shipped traces are gzipped: they are hugely repetitive JSON, so the
-    3090 set is 244 MB raw and 9.9 MB compressed, which is the difference
-    between shipping them and not.
+    Chrome traces are hugely repetitive JSON and compress by roughly 25x, so
+    both forms are accepted and a kept trace is worth gzipping.
     """
     opener = gzip.open if path.endswith(".gz") else open
     with opener(path, "rt") as fh:
