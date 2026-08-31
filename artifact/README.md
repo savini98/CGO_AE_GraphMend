@@ -98,9 +98,19 @@ graphmend-off arm measures. Every row reads `N -> N, 0% fixed`.
 
 There is no CLI switch for either key. Both are read from the **nearest
 ancestor `jac.toml`**: `jac` walks up from the working directory, the nearest
-file wins, and files further up are not merged in. This directory ships a
+file wins, and files further up are **not merged in**. This directory ships a
 [`jac.toml`](jac.toml) with the opt-in enabled, so a command you type here just
 works. Copy it next to your own script if you work elsewhere.
+
+The same nearest-wins rule governs which *compiler* runs. `[dev]
+jaclang_source` reroutes `import jaclang` to the patched toolchain in the
+submodule, and it is not inherited either, so both [`../jac.toml`](../jac.toml)
+and [`jac.toml`](jac.toml) carry it with their own relative path, and the
+harness writes it as an absolute path into each arm's temporary `jac.toml`. A
+`jac.toml` that sets the `[run]` keys but omits `[dev]` is the subtle version
+of gotcha 1: GraphMend is switched on, but the compiler that runs is the
+binary's own bundled `jaclang`, and every released `jaclang` predates
+GraphMend. The symptom is identical -- `N -> N, 0% fixed`, no diagnostic.
 
 The shipped harness does not depend on that file: `run_eval.py` writes a fresh
 `jac.toml` per arm into a private temporary directory, since the two arms
@@ -560,10 +570,16 @@ from a small random-weight config; Phi-4-mini is 2 layers with hidden size 128.
 **A row shows `MISMATCH` next to the input shape.** The two arms did not see
 the same input, so the `output_ok` comparison on that row means nothing.
 
-**`import jaclang` resolves to a pip-installed jaclang.** Any released
-`jaclang` on PyPI predates GraphMend. The harness puts `jaseci/jac` first on
-the subprocess `PYTHONPATH` so the patched toolchain wins; if you run the
-toolchain by hand, do the same.
+**`import jaclang` resolves to a pip-installed or bundled jaclang.** Any
+released `jaclang` predates GraphMend. Two mechanisms keep the patched
+toolchain in front, and a hand-written script needs at least one: `jaseci/jac`
+first on `PYTHONPATH`, which is what the harness sets for every arm, or a
+`[dev] jaclang_source` stanza in the nearest `jac.toml`, which is what the
+shipped `jac.toml` files carry. Check with:
+
+```bash
+python -c "import jaclang; print(jaclang.__file__)"    # want .../jaseci/jac/jaclang
+```
 
 **`no jaclang toolchain at .../jaseci/jac` or `has no GraphMend passes`.**
 `scripts/setup.sh` has not been run, or the submodule was not initialised.

@@ -12,6 +12,13 @@
 # exists so that a command a reviewer types by hand behaves the same way as the
 # harness does.
 
+# Reroute `import jaclang` to the patched toolchain in the submodule. Needed
+# here as well as at the repository root: the lookup takes the NEAREST jac.toml
+# and does not merge in files above it, so this file shadows the root one
+# entirely for any command run from this directory.
+[dev]
+jaclang_source = "../jaseci/jac"   # dir CONTAINING jaclang/, relative to this file
+
 [run]
 
 # GraphMend itself. Default is already `true` in the toolchain; it is written

@@ -65,6 +65,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from paper_eval._paths import (  # noqa: E402
     ARTIFACT_ROOT as _ARTIFACT_ROOT,
     ARM_PYTHONPATH as _ARM_PYTHONPATH,
+    JACLANG_DIR as _JACLANG_DIR,
 )
 
 
@@ -85,7 +86,12 @@ PAPER_BATCH_3090 = {
     "t5-small": 1345,
     "MoLFormer-XL-both10pct": 837,
 }
-_TOML = "[run]\ngraphmend = {on}\ngraphmend_claim_imports = {on}\n"
+# The [dev] stanza pins the compiler to the patched toolchain by absolute
+# path. Config resolution takes the NEAREST jac.toml, so without it this
+# file would shadow the repository's and the arm could fall back to a linked
+# dev binary's own checkout, with a jaclang that predates GraphMend.
+_TOML = ('[dev]\njaclang_source = "{src}"\n\n'
+         "[run]\ngraphmend = {on}\ngraphmend_claim_imports = {on}\n")
 
 
 def _load_weights(m, repo, rev=None):
@@ -542,7 +548,7 @@ def run(key, on, count):
     tcache = tempfile.mkdtemp(prefix="gmb10_triton_")
     try:
         open(os.path.join(wd, "jac.toml"), "w").write(
-            _TOML.format(on="true" if on else "false"))
+            _TOML.format(on="true" if on else "false", src=_JACLANG_DIR))
         shutil.copy(here, os.path.join(wd, "bench10.py"))
         env = dict(os.environ, PYTHONPATH=_ARM_PYTHONPATH,
                    PAPER_EVAL_DIR=_ARTIFACT_ROOT,

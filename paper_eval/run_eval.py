@@ -26,7 +26,15 @@ import tempfile
 from paper_eval import _paths
 from paper_eval.registry import MODELS, NETWORK_MODELS
 
+# Written per arm into a private temp dir. The [dev] stanza pins the compiler
+# to the patched toolchain by absolute path: config resolution takes the
+# NEAREST jac.toml, so without it this file would shadow the repository's and
+# the arm could fall back to a linked dev binary's own checkout -- silently, and
+# with a jaclang that predates GraphMend.
 _JAC_TOML = """\
+[dev]
+jaclang_source = "{src}"
+
 [run]
 graphmend = {on}
 graphmend_claim_imports = {on}
@@ -49,7 +57,8 @@ def _run(key: str, mode: str, state: str = "") -> dict:
     workdir = tempfile.mkdtemp(prefix=f"gm_{key.replace('/', '_')}_{mode}_")
     try:
         with open(os.path.join(workdir, "jac.toml"), "w") as fh:
-            fh.write(_JAC_TOML.format(on="true" if mode == "on" else "false"))
+            fh.write(_JAC_TOML.format(on="true" if mode == "on" else "false",
+                                      src=_paths.JACLANG_DIR))
         shutil.copy(entry_src, os.path.join(workdir, "entry.py"))
 
         env = dict(os.environ, PYTHONPATH=_paths.ARM_PYTHONPATH,
