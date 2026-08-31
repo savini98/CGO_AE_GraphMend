@@ -128,10 +128,12 @@ and no gate where any fixed threshold would fail honest hardware.
 - The 195-model survey of §1 and §5, which selected the benchmark suite.
 - Table 2's steady-state and throughput magnitudes. Both are measured on your
   hardware; neither carries a validation threshold.
-- Absolute break counts on 8 of the 27 rows read lower than Table 2's, because
-  the harness builds small random-weight configs rather than full pretrained
-  models. Fix rate, which is what Table 2's `Fixed(%)` column reports, is
-  unaffected. Both numbers are listed per row in the artifact guide.
+- Absolute break counts on the fp32 CPU sweep total 122 against Table 2's 147,
+  with 17 of 26 rows matching exactly. The largest group that differs is the
+  BART family, whose fp16-guarded breaks do not exist in fp32; measured on the
+  GPU path those four rows match Table 2 exactly. Fix rate, which is what
+  Table 2's `Fixed(%)` column reports, matches on 25 of 27 rows. Both counts
+  are listed per row in the artifact guide.
 
 ## Layout
 

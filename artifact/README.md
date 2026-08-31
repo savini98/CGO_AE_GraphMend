@@ -241,10 +241,24 @@ Measured inside `artifact/Dockerfile.cpu` on torch 2.12.1 and transformers
 | Matching Table 2's break count | 19 of 27 |
 | Output fingerprint identical | 27 of 27 |
 
-The harness builds each model from a small random-weight config so it is fast
-and offline. Graph breaks are structural — they are code paths — so fix rate and
-correctness carry over, but a shallower model can expose fewer break sites.
-Both counts are given per row.
+The CPU sweep runs in **fp32**, and that is what makes its absolute counts
+differ from Table 2's: 122 breaks against 147, with 17 of 26 rows matching
+exactly. The largest group that differs is the BART family, whose guard at
+`modeling_bart.py:568` leads with `hidden_states.dtype == torch.float16` — a
+static bool that Dynamo folds to False in fp32, so those data-dependent breaks
+do not exist there. Measured on the GPU path in fp16, with the reference batch
+shape, those four rows match Table 2 exactly:
+
+| Model | fp32 CPU row | GPU row (`bench.py --count`) | Table 2 |
+|---|---|---|---|
+| bart-base | 3 | **7 → 0** | 7 |
+| bart-large-cnn | 3 | **7 → 0** | 7 |
+| rebel-large | 3 | **7 → 0** | 7 |
+| opus-mt-fr-en | 3 | **6 → 0** | 6 |
+
+The fp32 rows are kept as they are on purpose: the correctness claim is that
+**FP32** outputs are bit-identical, and that is what `output_ok` checks. The two
+paths measure different things deliberately. Both counts are given per row.
 
 ### The 21 offline rows
 
@@ -290,9 +304,12 @@ own numbers, and what survives is the paper's declared out-of-scope category
 (`tensor.item()`, dynamic-shape and data-dependent operators). A clean sweep on
 any of them would be the anomaly.
 
-**grounding-dino reads 56% where Table 2 reads 58%** — 16 breaks to 7 is
-56.25%. `[Trap]` fires as expected and the three surviving sites are all in the
-paper's out-of-scope categories.
+**grounding-dino reads 56% where Table 2 reads 58%** — 16 breaks to 7 against
+17 to 7. It is the only row whose reported percentage differs, by one break out
+of seventeen. `[Trap]` fires as expected and the three surviving sites are all
+in the paper's out-of-scope categories. Of the five rows whose absolute count
+still differs, the fix rate matches exactly on chronos-bolt-small, clap and
+moe-minicpm.
 
 **stella reproduces its 0% row only on CUDA with xformers**, because its breaks
 live behind unpadding. The CPU fallback measures a different, smaller break set.

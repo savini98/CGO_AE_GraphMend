@@ -149,9 +149,12 @@ than assuming one.
 weights. 6 need network access and `trust_remote_code`: `Florence-2`,
 `MoLFormer-XL-both10pct` (revision pinned to `7b12d946c181`),
 `chronos-bolt-small`, `Qwen-Audio-Chat`, `stella-en-400M-v5`,
-`moe-minicpm-x4-base`. Small configs are sound here because graph breaks are
-structural; absolute break counts can therefore be lower than the paper's,
-which uses full pretrained models, and fix rate is the compared quantity.
+`moe-minicpm-x4-base`. Small configs are sound because graph breaks are
+structural, and 17 of 26 rows match Table 2's absolute count exactly. Where the
+counts differ the cause is dtype rather than model size: the fp32 CPU sweep
+folds away guards that are conditioned on `torch.float16`, most visibly in the
+BART family, which matches Table 2 exactly when measured in fp16 on the GPU
+path. Fix rate is the compared quantity.
 
 ## A.4 Installation
 

@@ -225,13 +225,16 @@ Florence-2-**large**; it is the same `modeling_florence2.py` at a smaller width.
 
 ## Notes / faithful-but-scoped caveats
 
-- **Small configs vs full models.** To keep the harness fast and download-free,
-  `registry.py` builds each model from a *small* config (a few layers, random
-  weights). Graph breaks are structural (code paths), so the fix-rate and
-  correctness results are valid, but the *absolute* break count can be lower
-  than the paper's (which uses the full pretrained models). To match the paper's
-  exact per-model counts, swap a builder to `AutoModel.from_pretrained(<id>)`
-  with the paper's inputs (needs network + disk).
+- **Small configs, and fp32.** `registry.py` builds each model from a *small*
+  config (a few layers, random weights) so the harness is fast and
+  download-free. Graph breaks are structural, so the fix-rate and correctness
+  results carry over, and 17 of 26 rows match the paper's absolute count
+  exactly. Where a count is lower, the cause is usually **dtype rather than
+  depth**: a guard whose first conjunct is `dtype == torch.float16` is a static
+  bool that Dynamo folds away in fp32, so the data-dependent break behind it
+  does not exist. The BART family is the clearest case, and it matches Table 2
+  exactly when measured in fp16 through `artifact/gpu/bench.py --count`. The
+  fp32 rows stay fp32 because the correctness claim is about FP32 outputs.
 - **Correctness comparison.** The runner fixes `torch.manual_seed(0)` so the
   off/on runs get identical weights; the output tensor (`logits` /
   `last_hidden_state`) is SHA-256 fingerprinted and compared. The input shape is

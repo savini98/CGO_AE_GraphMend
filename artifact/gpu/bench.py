@@ -129,10 +129,26 @@ def _load_weights(m, repo, rev=None):
         hits = len(want & set(cand))
         if hits > best_hits:
             best, best_hits = cand, hits
+    # And the mirror case: the checkpoint may be the BASE model while the timed
+    # model is a task head, so the TARGET's keys carry a prefix the checkpoint
+    # lacks. facebook/bart-base ships BartModel weights (`encoder.layers...`)
+    # while BartForConditionalGeneration wants them under `model.`, which shows
+    # up as every key missing and every key unexpected at once.
+    for pre in {k.split(".")[0] + "." for k in want if "." in k}:
+        cand = {pre + k: v for k, v in sd.items()}
+        hits = len(want & set(cand))
+        if hits > best_hits:
+            best, best_hits = cand, hits
     if best is not None:
         sd = best
     res = m.load_state_dict(sd, strict=False)
-    ignorable = ("rotary", "inv_freq", "position_ids", "masked_bias")
+    # `final_logits_bias` is a BART buffer, not a learned parameter: the
+    # constructor registers it as zeros and the published checkpoints omit it,
+    # so it is reported missing on every bart-family model while the weights
+    # are in fact complete. Zeros is also its correct value, so accepting it
+    # changes no output.
+    ignorable = ("rotary", "inv_freq", "position_ids", "masked_bias",
+                 "final_logits_bias")
     # A tied key (t5's encoder/decoder embed_tokens and lm_head all alias
     # shared.weight) is reported missing but is in fact already loaded, so
     # accept it exactly when it shares storage with a key that did load.
@@ -207,8 +223,55 @@ def _auto_batch(model, inputs, torch, target=0.70):
         return None
 
 
+# The BART-family rows of Table 2, whose break count is DTYPE-GATED. The guard
+# at transformers/models/bart/modeling_bart.py:568 reads
+#
+#     if hidden_states.dtype == torch.float16 and (
+#         torch.isinf(hidden_states).any() or torch.isnan(hidden_states).any()):
+#
+# and the first conjunct is a static Python bool. In fp32 Dynamo folds it to
+# False and never reaches the data-dependent test, so the four DC breaks do not
+# exist at all: the same model measures 3 breaks in fp32 and 7 in fp16. The
+# reference scripts select fp16 whenever CUDA is present, which is what Table 2
+# counts, so these rows are built the same way here: real pretrained weights,
+# half precision on the device.
+#
+# jac/paper_eval/registry.py keeps its fp32 small-config versions of these rows,
+# because the paper's correctness claim is that FP32 outputs are bit-identical
+# and that is the quantity `output_ok` checks. The two are measuring different
+# things on purpose.
+_BART_FAMILY = {
+    "bart-base":      ("facebook/bart-base",        "BartForConditionalGeneration", 7),
+    "bart-large-cnn": ("facebook/bart-large-cnn",   "BartForConditionalGeneration", 7),
+    "rebel-large":    ("Babelscape/rebel-large",    "BartForConditionalGeneration", 7),
+    "opus-mt-fr-en":  ("Helsinki-NLP/opus-mt-fr-en", "MarianMTModel",               6),
+}
+
+
 def build(key, device):
     import torch
+    if key in _BART_FAMILY:
+        import transformers
+        repo, clsname, _expected = _BART_FAMILY[key]
+        cfg = transformers.AutoConfig.from_pretrained(repo)
+        m = _load_weights(getattr(transformers, clsname)(cfg), repo)
+        if device == "cuda":
+            m = m.half()
+        b, s = _bs(4, 128)
+        vocab = getattr(cfg, "vocab_size", 32000)
+        # The batch shape matters as much as the dtype here. The reference
+        # scripts build `{input_ids, attention_mask, decoder_input_ids}` with
+        # the decoder side just ONE token (the BOS that starts generation),
+        # not a full-length sequence. Omitting the mask, or feeding a
+        # full-length decoder input, traces different code and yields one graph
+        # fewer. Reproduced from bart_base_script.py's fixed_batch().
+        bos = (getattr(cfg, "decoder_start_token_id", None)
+               or getattr(cfg, "bos_token_id", None) or 0)
+        return m.to(device).eval(), {
+            "input_ids": torch.randint(0, vocab, (b, s), device=device),
+            "attention_mask": torch.ones((b, s), dtype=torch.long, device=device),
+            "decoder_input_ids": torch.full((b, 1), bos, dtype=torch.long,
+                                            device=device)}
     if key == "t5-small":
         from transformers import T5Config, T5ForConditionalGeneration
         cfg = T5Config.from_pretrained("t5-small")
