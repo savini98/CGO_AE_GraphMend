@@ -1,9 +1,9 @@
 """GraphMend GPU cold-start and steady-state benchmark, paper methodology.
 
-This reproduces the authors' own measurement, not a re-invention of it. The
-definitions come from `models/profiling_utils.py` and `cold_start_no_compile.py`
-in the GraphMend research repository, and the two matter because a naive
-wall-clock timer measures a different quantity and lands near 1x by
+This implements the paper's own measurement rather than a re-invention of it.
+The definitions come from `models/profiling_utils.py` and
+`cold_start_no_compile.py` in our research repository, and they matter because a
+naive wall-clock timer measures a different quantity and lands near 1x by
 construction.
 
 COLD START. Profile from the very FIRST run, with no warmup, and take the
@@ -27,15 +27,17 @@ CONFIGURATION MATTERS MORE THAN THE METRIC. Three settings in the paper's model
 scripts each drag every ratio toward 1.0 when missed: the batch size (about 70%
 of VRAM, 837 for MoLFormer, not 8), the input shape (real SMILES padded to about
 37 tokens, not 128), and TF32 (allow_tf32 plus matmul_precision("high"), which
-this file now sets, worth roughly 2x on Ampere). With all three matched, this
-benchmark reproduces the authors' own MoLFormer warm timings to within about 1%:
-119.3 ms against their 117.8 ms original, 115.5 ms against their 116.2 ms fixed,
-at 1.0 GB against their 0.97 GB peak.
+this file sets, worth roughly 2x on Ampere). `--paper-batch` selects the paper's
+per-model batch sizes. With all three matched, this benchmark reproduces the
+paper's MoLFormer per-iteration times to within about 1%: 119.3 ms against
+117.8 ms original, 115.5 ms against 116.2 ms fixed, at 1.0 GB against 0.97 GB
+peak.
 
-On that matched configuration steady state comes out at 1.033x, and the authors'
-own traces give 1.014x, against Table 2's 1.13x. That disagreement is the real
-open item, and it is not a mis-configuration artifact: the configuration
-reproduces their per-iteration times to 1%.
+Steady state is a much smaller effect than cold start and is sensitive to batch
+size, so this file prints the raw region-window ratio (Table 2's metric)
+alongside a compile-subtracted figure rather than picking one. Compare like for
+like: a ratio taken at one batch size is not comparable to a column measured at
+another.
 
 Both arms load FULL PRETRAINED checkpoints, because latency depends on real
 layer counts and widths, and both run under `jac run` with their own jac.toml:
@@ -44,7 +46,7 @@ the entry program has to be Jac-compiled or every [Defer] rewrite stays inert
 cache, or the second arm skips codegen and its "cold" run is not cold.
 
 Compilation is `torch.compile(m, backend="inductor", mode="reduce-overhead",
-fullgraph=False)`, matching the model scripts in the research repository.
+fullgraph=False)`, matching the paper's model scripts.
 
     PYTHONPATH=$PWD python ../artifact/gpu/bench.py t5-small
     PYTHONPATH=$PWD python ../artifact/gpu/bench.py --count t5-small
@@ -66,7 +68,7 @@ def _stamp_now():
 ARM = "GM_BENCH10_ARM"
 
 # Per-model batch sizes the paper uses on an RTX 3090, from run_all_3090_new.log
-# in the authors' research repository. The paper sizes each model to about 70%
+# in our research repository. The paper sizes each model to about 70%
 # of GPU memory and runs the original and fixed variants at the same batch, so a
 # comparison at any other batch is measuring a different point. --paper-batch
 # selects these; without it the small defaults in build() apply, which are fine
@@ -287,7 +289,7 @@ def arm():
             torch.cuda.synchronize()
 
     # One eager forward before anything is compiled, matching the "quick eager
-    # sanity check (no compile)" the research repo's per-model scripts run
+    # sanity check (no compile)" the paper's per-model scripts run
     # before profiling. This is not a formality: lazily-populated module caches
     # get filled here, OUTSIDE any captured region. Phi-4's rotary embedding
     # fills `self.long_inv_freq` on first use, and without this warm-up that
@@ -332,7 +334,7 @@ def arm():
         # program. The signature of that failure is identical CUDA-graph launch
         # counts between the two arms, which is what this benchmark reports.
         # `dynamic` is left at its default, matching the compile_model() in the
-        # research repo's per-model scripts exactly. Passing dynamic=False
+        # paper's per-model scripts exactly. Passing dynamic=False
         # specialises on shape and makes a model that mutates module state in
         # forward recompile after iteration 1, which shows up as region "0/1"
         # taking over from "0/0" and leaves the cold window undefined.
@@ -426,7 +428,7 @@ def arm():
         os.unlink(tf)
 
         # Iteration boundaries. Region 0/N is the FIRST subgraph of an
-        # iteration, so consecutive 0/N markers delimit iterations. The authors'
+        # iteration, so consecutive 0/N markers delimit iterations. The paper's
         # scripts match "0/0" exactly, which is right until a model RECOMPILES:
         # Dynamo then issues a second code variant, later iterations arrive as
         # 0/1, and a single 0/0 is left with no window at all. Matching any 0/N
@@ -443,7 +445,7 @@ def arm():
         # matching "0/0" finds nothing and the model looks unmeasurable. And a
         # model that recompiles issues a second variant, so later iterations
         # arrive as N/1 while N/0 occurs once; matching any variant of the
-        # lowest N keeps those iterations. The authors' cold_start_no_compile.py
+        # lowest N keeps those iterations. Our cold_start_no_compile.py
         # matches "0/0" literally, which is why it cannot measure this model.
         _mark = {}
         for e in evs:
@@ -676,12 +678,12 @@ def main():
             #
             # RAW WINDOW is Table 2's metric: the interval between the first two
             # "Torch-Compiled Region: 0/0" markers, original over fixed, with
-            # nothing subtracted. Verified against the authors' own 3090
+            # nothing subtracted. Verified against the shipped 3090
             # MoLFormer traces, where it gives 6200.7 / 250.9 = 24.71x, the
             # value printed in Table 2.
             #
             # NO-COMPILE subtracts backend_compile from both arms, following
-            # cold_start_no_compile.py in the authors' repository, on the
+            # cold_start_no_compile.py in our research repository, on the
             # grounds that merging subgraphs does not reduce total compile work.
             # It is the more conservative number and it is much smaller.
             print(f"  cold, RAW WINDOW  off={off['cold_window_ms']:9.1f}ms "
