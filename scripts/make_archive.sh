@@ -77,4 +77,4 @@ if tar -tzf "$OUT" | grep -q '/\._'; then
 fi
 echo "    $(du -h "$OUT" | cut -f1)  $OUT"
 echo
-echo "Upload this to Zenodo, then fill {{DOI}} in artifact/appendix.tex (A.2, A.3.1)."
+echo "Upload this to Zenodo, then fill {{DOI}} into the paper's artifact appendix."

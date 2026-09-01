@@ -373,7 +373,6 @@ CGO_AE_GraphMend/
 │   └── _paths.py           #   where the toolchain and the harness live
 └── artifact/               # this package
     ├── README.md           #   this file
-    ├── appendix.tex        #   artifact appendix, for the paper
     ├── Dockerfile           #   one image, all three claims
     ├── run.sh               #   entry point: c1 / c2 / c3
     ├── run_break_analysis.sh    # C1 and C2; --c1 / --c2 to run one

@@ -14,3 +14,7 @@ hf-cache/
 
 # Jac compiler cache (machine-generated build artifacts)
 .jac/
+
+# The artifact appendix is drafted here but belongs to the paper, not the
+# artifact deposit. Kept local and untracked.
+artifact/appendix.tex
