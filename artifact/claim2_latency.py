@@ -42,13 +42,12 @@ import tempfile
 
 # Table 2, RTX 3090: (cold, steady). Keys are bench.py model keys.
 TABLE2 = {
+    "rebel-large": (19.86, 1.12),
+    "bart-large-cnn": (21.07, 1.13),
+    "opus-mt-fr-en": (13.16, 1.10),
+    "bart-base": (11.87, 1.15),
     "t5-small": (3.49, 1.08),
     "MoLFormer-XL-both10pct": (24.71, 1.13),
-    "Phi-4-mini-instruct": (3.60, 1.13),
-    "bart-large-cnn": (21.07, 1.13),
-    "bart-base": (11.87, 1.15),
-    "rebel-large": (19.86, 1.12),
-    "opus-mt-fr-en": (13.16, 1.10),
     "t5-base": (2.27, 1.09),
     "t5-3b": (3.01, 1.08),
     "flan-t5-large": (3.27, 1.06),
@@ -60,6 +59,13 @@ TABLE2 = {
     "whisper-base": (2.49, 1.09),
     "whisper-small": (3.09, 1.08),
     "whisper-large-v3": (3.06, 1.08),
+    "grounding-dino-tiny": (5.20, 1.08),
+    "grounding-dino-base": (5.17, 1.06),
+    "layoutlmv3-base": (6.78, 1.06),
+    "chronos-bolt-small": (4.64, 1.09),
+    "Florence-2": (20.95, 1.19),
+    "Qwen-Audio-Chat": (2.76, 1.15),
+    "Phi-4-mini-instruct": (3.60, 1.13),
 }
 
 # Which fixed_models/<dir> supplies each row's transformed sources. Several rows
@@ -84,6 +90,12 @@ SOURCES = {
     "whisper-base": ["whisper-base"],
     "whisper-small": ["whisper-small"],
     "whisper-large-v3": ["whisper"],
+    "grounding-dino-tiny": ["grounding-dino"],
+    "grounding-dino-base": ["grounding-dino-base"],
+    "layoutlmv3-base": ["layoutlmv3-base"],
+    "chronos-bolt-small": ["chronos-bolt-small"],
+    "Florence-2": ["Florence-2"],
+    "Qwen-Audio-Chat": ["Qwen-Audio-Chat"],
 }
 
 # The paper's per-model batch, read from run_all_3090_new.log in the research
@@ -301,6 +313,9 @@ def main():
             bad += 1
             continue
 
+        if os.environ.get("GM_DEBUG_ARMS"):
+            print(f"  RAW {key} stock {json.dumps(off, sort_keys=True)}")
+            print(f"  RAW {key} fixed {json.dumps(on, sort_keys=True)}")
         lo, ln = off.get("cudagraph_launches"), on.get("cudagraph_launches")
         if lo is None or ln is None:
             print(f"{key:28s} FAIL (no launch count)")
@@ -313,6 +328,15 @@ def main():
             bad += 1
             continue
         try:
+            # The raw first-iteration window, deliberately, and NOT the
+            # compile-excluded cold_ms. cold_start_no_compile.py subtracts
+            # events named "backend_compile", and there are zero of those in
+            # any of the paper's own reference traces -- torch records that work
+            # as "dynamo_timed" spans instead. So on the traces the paper was
+            # computed from, its compile_ms is 0 and its `cold_speedup` equals
+            # the `old_speedup` it meant to replace. The raw window IS the
+            # published metric. Using cold_ms here would silently diverge on any
+            # torch that does emit backend_compile.
             cold = off["cold_window_ms"] / on["cold_window_ms"]
             warm = off["warm_ms"] / on["warm_ms"]
         except (KeyError, ZeroDivisionError):

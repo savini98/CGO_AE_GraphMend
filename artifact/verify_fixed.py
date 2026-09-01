@@ -89,12 +89,12 @@ EXPECTED = {
     "layoutlmv3-base": (2, 0),
     # Partial by design: 2 of the 5 are tensor.item(), out of scope (Table 2: 40%).
     "longformer-scico": (5, 3),
-    # 0% rows: the breaks are dynamic-shape / data-dependent operators, which the
-    # paper declares unfixable. Unchanged is the correct result here.
-    "clap-htsat-fused": (4, 4),
-    "moe-minicpm-x4-base": (15, 15),
-    "stella-en-400M-v5": (4, 4),
 }
+
+# Not here, deliberately: clap-htsat-fused, moe-minicpm-x4-base and
+# stella-en-400M-v5. Table 2 reports them at 0% fixed and N/A for latency --
+# their breaks are dynamic-shape and data-dependent operators the paper puts out
+# of scope. They are Claim 1 rows only; there is no speedup to measure.
 
 SHIM = '''
 import torch
@@ -214,12 +214,13 @@ def count(python, key, bench, extra_path, workdir, hf_modules=None):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("models", nargs="*")
-    ap.add_argument("--fixed-root", default=os.path.expanduser(
-        "~/ae-verify/runtime_fixed"),
-        help="dir of <model>/ dirs holding *.graphmend.py")
+    _here = os.path.dirname(os.path.abspath(__file__))
+    ap.add_argument("--fixed-root",
+                    default=os.path.join(_here, "fixed_models"),
+                    help="dir of <model>/ dirs holding *.graphmend.py")
     ap.add_argument("--python", default=sys.executable)
-    ap.add_argument("--bench", default=os.path.expanduser(
-        "~/ae-verify/mainv/artifact/gpu/bench.py"))
+    ap.add_argument("--bench",
+                    default=os.path.join(_here, "gpu", "bench.py"))
     o = ap.parse_args()
 
     rows = [r for r in (o.models or list(EXPECTED)) if r in EXPECTED]

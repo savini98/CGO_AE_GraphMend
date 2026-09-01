@@ -403,6 +403,14 @@ def _build_extra(key, device, torch):
         out = _to_device(inputs, device, torch)
         if device == "cuda" and "pixel_values" in out:
             out["pixel_values"] = out["pixel_values"].half()
+        # Florence-2 wraps a BART-style encoder-decoder, so a forward with no
+        # decoder_input_ids raises rather than starting generation. One BOS,
+        # same single-token decoder start the other seq2seq rows use.
+        tcfg = getattr(cfg, "text_config", cfg)
+        bos = (getattr(tcfg, "decoder_start_token_id", None)
+               or getattr(tcfg, "bos_token_id", None) or 2)
+        out["decoder_input_ids"] = torch.full(
+            (b, 1), int(bos), dtype=torch.long, device=device)
         return m.to(device).eval(), out
 
     if key == "Qwen-Audio-Chat":
@@ -747,7 +755,12 @@ def arm():
         _tdir = os.environ.get("GM_BENCH10_TRACE_DIR")
         if _tdir:
             os.makedirs(_tdir, exist_ok=True)
-            _armname = "fixed" if os.environ.get("GM_BENCH10_ON") else "original"
+            # NOT a bare truth test on the variable: the caller sets this to
+            # the STRING "0" for the original arm, and "0" is truthy, so both
+            # arms were named "fixed" and the original arm's trace was
+            # overwritten by the fixed arm that ran after it.
+            _armname = ("fixed" if os.environ.get("GM_BENCH10_ON", "") not in
+                        ("", "0", "false", "False") else "original")
             _stamp = os.environ.get("GM_BENCH10_STAMP", "run")
             _dest = os.path.join(
                 _tdir, f"{os.environ.get('GM_MODEL', 'model')}"
