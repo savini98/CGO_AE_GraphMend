@@ -40,7 +40,7 @@ reproduces their per-iteration times to 1%.
 Both arms load FULL PRETRAINED checkpoints, because latency depends on real
 layer counts and widths, and both run under `jac run` with their own jac.toml:
 the entry program has to be Jac-compiled or every [Defer] rewrite stays inert
-(see jac/paper_eval/README.md). Each arm gets a private inductor and Triton
+(see paper_eval/README.md). Each arm gets a private inductor and Triton
 cache, or the second arm skips codegen and its "cold" run is not cold.
 
 Compilation is `torch.compile(m, backend="inductor", mode="reduce-overhead",
@@ -83,10 +83,9 @@ def _load_weights(m, repo, rev=None, extra_ignorable=()):
 
     from_pretrained cannot be used here: under `graphmend_claim_imports = true`
     GraphMend claims transformers/modeling_utils.py and the recompiled
-    `no_init_weights()` raises UnboundLocalError on its `global _init_weights`
-    (see globrepro/ for a 12-line standalone repro). The direct constructor
-    path that jac/paper_eval/registry.py already uses is unaffected, so the
-    weights are loaded into it by hand.
+    `no_init_weights()` raises UnboundLocalError on its `global _init_weights`.
+    The direct constructor path that paper_eval/registry.py already uses is
+    unaffected, so the weights are loaded into it by hand.
     """
     import glob, os, torch
     from huggingface_hub import snapshot_download
@@ -259,7 +258,7 @@ def _auto_batch(model, inputs, torch, key, target=0.70):
 # counts, so these rows are built the same way here: real pretrained weights,
 # half precision on the device.
 #
-# jac/paper_eval/registry.py keeps its fp32 small-config versions of these rows,
+# paper_eval/registry.py keeps its fp32 small-config versions of these rows,
 # because the paper's correctness claim is that FP32 outputs are bit-identical
 # and that is the quantity `output_ok` checks. The two are measuring different
 # things on purpose.
@@ -507,7 +506,7 @@ def build(key, device):
         # real config's size together with a batch built by the model's own
         # processor from a real image: a 480x640 RGB frame becomes a
         # (1, 3, 800, 1066) pixel_values plus a pixel_mask and the tokenised
-        # prompt. jac/paper_eval's small-config version of this row synthesises
+        # prompt. paper_eval's small-config version of this row synthesises
         # tensors instead and sees 16 breaks; with the processor batch it is 17,
         # which is Table 2's count.
         cfg = AutoConfig.from_pretrained(repo)
