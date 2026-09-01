@@ -78,6 +78,7 @@ ARG TORCHVISION_VERSION=0.27.1
 # cu126 is the paper's CUDA 12.6.
 ARG TORCH_INDEX=https://download.pytorch.org/whl/cu126
 ARG NUMPY_VERSION=2.4.6
+ARG TRITON_VERSION=3.7.1
 ARG TRANSFORMERS_VERSION=4.52.4
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -102,6 +103,12 @@ RUN pip install --index-url "${TORCH_INDEX}" \
         "torch==${TORCH_VERSION}" \
         "torchvision==${TORCHVISION_VERSION}" \
         "numpy==${NUMPY_VERSION}"
+
+# torch pulls triton in transitively, so without this the version is whatever
+# resolution happens to pick. The appendix names Triton 3.7 for the GPU
+# experiments, so it is pinned and checked here like everything else.
+RUN pip install "triton==${TRITON_VERSION}" \
+    && python -c "import triton; assert triton.__version__.startswith('3.7'), triton.__version__"
 
 RUN pip install "transformers==${TRANSFORMERS_VERSION}"
 
