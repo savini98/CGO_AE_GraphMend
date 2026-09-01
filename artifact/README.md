@@ -344,7 +344,7 @@ CGO_AE_GraphMend/
 │   ├── run_compiler_overhead.sh # Figure 10, Section 5.7
 │   └── make_archive.sh     #   self-contained tarball for the Zenodo deposit
 ├── paper_eval/             # reproduction harness
-│   ├── registry.py         #   per-model builders and transform scope
+│   ├── registry.py         #   per-model builders and inputs
 │   ├── run_eval.py         #   two-arm runner (Claims 2 and 3)
 │   ├── run_fullgraph.py    #   full-graph capture (Claim 4)
 │   ├── run_why.py          #   per-break cause reporting
