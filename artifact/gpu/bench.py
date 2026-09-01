@@ -78,7 +78,7 @@ PAPER_BATCH_3090 = {
 _TOML = "[run]\ngraphmend = {on}\ngraphmend_claim_imports = {on}\n"
 
 
-def _load_weights(m, repo, rev=None):
+def _load_weights(m, repo, rev=None, extra_ignorable=()):
     """Real pretrained weights WITHOUT PreTrainedModel.from_pretrained.
 
     from_pretrained cannot be used here: under `graphmend_claim_imports = true`
@@ -131,7 +131,13 @@ def _load_weights(m, repo, rev=None):
     # so it is reported missing on every bart-family model while the weights
     # are in fact complete. Zeros is also its correct value, so accepting it
     # changes no output.
-    ignorable = ("rotary", "inv_freq", "position_ids", "masked_bias",
+    # extra_ignorable: heads a checkpoint legitimately omits. longformer-scico
+    # is published without lm_head weights, and the reference loads it with
+    # from_pretrained, which initialises them and warns. A randomly initialised
+    # head changes no break count and no graph structure, so accepting it here
+    # matches the reference rather than loosening the check for everything.
+    ignorable = tuple(extra_ignorable) + ("rotary", "inv_freq", "position_ids",
+                                          "masked_bias",
                  "final_logits_bias")
     # A tied key (t5's encoder/decoder embed_tokens and lm_head all alias
     # shared.weight) is reported missing but is in fact already loaded, so
@@ -232,8 +238,208 @@ _BART_FAMILY = {
 }
 
 
+
+# Table 2 text rows, each recipe taken from that row's own reference script:
+# (repo, auto class, decoder_input_ids?, prompt).
+#
+# DTYPE. Every one of these scripts loads with
+# `torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32`,
+# so they are half on GPU. That is not cosmetic -- BART's break count is
+# dtype-gated, and reading it in fp32 loses the data-dependent breaks entirely.
+#
+# DECODER IDS. The seq2seq rows are fed a single BOS `decoder_input_ids`, the
+# token that starts generation, exactly as the BART family is. The two rows
+# that take none (Pegasus, longformer) say so in their own fixed_batch().
+_TEXT_ROWS = {
+    "t5-base":        ("google-t5/t5-base",        "AutoModelForSeq2SeqLM", True),
+    "t5-3b":          ("google-t5/t5-3b",          "AutoModelForSeq2SeqLM", True),
+    "flan-t5-large":  ("google/flan-t5-large",     "AutoModelForSeq2SeqLM", True),
+    "inclusively-reformulation-it5": (
+        "E-MIMIC/inclusively-reformulation-it5",   "AutoModelForSeq2SeqLM", True),
+    "biogpt":         ("microsoft/biogpt",         "AutoModelForCausalLM",  True),
+    "blenderbot-400M-distill": (
+        "facebook/blenderbot-400M-distill",        "AutoModelForSeq2SeqLM", True),
+    "tiny-random-PegasusForCausalLM": (
+        "hf-internal-testing/tiny-random-PegasusForCausalLM",
+        "AutoModelForCausalLM",  False),
+    # The reference loads this one with AutoModelForMaskedLM; AutoModel drops
+    # the head and leaves pooler weights unmatched.
+    "longformer-scico": ("allenai/longformer-scico",
+                         "AutoModelForMaskedLM", False),
+}
+
+# Whisper takes a mel spectrogram, not token ids: the processor turns 30s of
+# audio into input_features, and the decoder is started with
+# <|startoftranscript|> (50258), one token, as in whisper_*_script.py.
+_WHISPER_ROWS = {
+    "whisper-base":     "openai/whisper-base",
+    "whisper-small":    "openai/whisper-small",
+    "whisper-large-v3": "openai/whisper-large-v3",
+}
+
+
+def _text_row(key, device, torch):
+    import transformers
+
+    repo, clsname, wants_decoder = _TEXT_ROWS[key]
+    cfg = transformers.AutoConfig.from_pretrained(repo, trust_remote_code=True)
+    cls = getattr(transformers, clsname)
+    m = _load_weights(cls.from_config(cfg, trust_remote_code=True)
+                      if hasattr(cls, "from_config") else cls(cfg), repo,
+                      extra_ignorable=("lm_head", "pooler")
+                      if key == "longformer-scico" else ())
+    if device == "cuda":
+        m = m.half()
+    b, s = _bs(4, 128)
+    vocab = getattr(cfg, "vocab_size", None) or 32000
+    batch = {
+        "input_ids": torch.randint(0, min(vocab, 30000), (b, s), device=device),
+        "attention_mask": torch.ones((b, s), dtype=torch.long, device=device),
+    }
+    if wants_decoder:
+        bos = (getattr(cfg, "decoder_start_token_id", None)
+               or getattr(cfg, "bos_token_id", None) or 0)
+        batch["decoder_input_ids"] = torch.full((b, 1), bos, dtype=torch.long,
+                                                device=device)
+    return m.to(device).eval(), batch
+
+
+def _whisper_row(key, device, torch):
+    import transformers
+
+    repo = _WHISPER_ROWS[key]
+    cfg = transformers.AutoConfig.from_pretrained(repo)
+    m = _load_weights(transformers.WhisperForConditionalGeneration(cfg), repo)
+    if device == "cuda":
+        m = m.half()
+    b, _ = _bs(4, 128)
+    n_mel = getattr(cfg, "num_mel_bins", 80)
+    dt = torch.float16 if device == "cuda" else torch.float32
+    # 3000 frames is the processor's fixed 30-second window.
+    feats = torch.randn(b, n_mel, 3000, device=device, dtype=dt)
+    return m.to(device).eval(), {
+        "input_features": feats,
+        "decoder_input_ids": torch.full((b, 1), 50258, dtype=torch.long,
+                                        device=device)}
+
+
+
+def _dummy_image(h=480, w=640):
+    """A deterministic RGB image; the processors need a real PIL object."""
+    import numpy as np
+    from PIL import Image
+
+    rng = np.random.RandomState(0)
+    return Image.fromarray(rng.randint(0, 255, (h, w, 3), dtype=np.uint8))
+
+
+def _to_device(inputs, device, torch):
+    return {k: (v.to(device) if isinstance(v, torch.Tensor) else v)
+            for k, v in inputs.items()}
+
+
+_GDINO = {
+    "grounding-dino-tiny": "IDEA-Research/grounding-dino-tiny",
+    "grounding-dino-base": "IDEA-Research/grounding-dino-base",
+}
+
+
+def _build_extra(key, device, torch):
+    """Rows needing a processor or Hub remote code. None if not one of them."""
+    import transformers
+
+    if key in _GDINO:
+        repo = _GDINO[key]
+        proc = transformers.AutoProcessor.from_pretrained(repo)
+        cfg = transformers.AutoConfig.from_pretrained(repo)
+        m = _load_weights(
+            transformers.GroundingDinoForObjectDetection(cfg), repo)
+        b, _ = _bs(1, 128)
+        # fp32 deliberately: the reference records fp16 breaking the fusion
+        # layers on this model.
+        inputs = proc(images=[_dummy_image()] * b,
+                      text=["a cat. a remote control."] * b,
+                      return_tensors="pt")
+        return m.to(device).eval(), _to_device(inputs, device, torch)
+
+    if key == "layoutlmv3-base":
+        repo = "microsoft/layoutlmv3-base"
+        proc = transformers.AutoProcessor.from_pretrained(repo, apply_ocr=False)
+        cfg = transformers.AutoConfig.from_pretrained(repo)
+        m = _load_weights(transformers.LayoutLMv3Model(cfg), repo)
+        words = ["hello", "world", "document", "understanding", "test"]
+        boxes = [[0, 0, 100, 50], [150, 0, 300, 50], [0, 100, 200, 150],
+                 [250, 100, 500, 150], [0, 200, 100, 250]]
+        inputs = proc(images=_dummy_image(224, 224), text=words, boxes=boxes,
+                      return_tensors="pt", padding=True, truncation=True)
+        return m.to(device).eval(), _to_device(inputs, device, torch)
+
+    if key == "chronos-bolt-small":
+        import numpy as np
+        from chronos.chronos_bolt import ChronosBoltModelForForecasting
+
+        repo = "amazon/chronos-bolt-small"
+        cfg = transformers.AutoConfig.from_pretrained(repo)
+        m = _load_weights(ChronosBoltModelForForecasting(cfg), repo)
+        b, _ = _bs(1, 128)
+        rng = np.random.RandomState(42)
+        ctx = np.cumsum(rng.randn(b, 128), axis=1).astype("float32")
+        return m.to(device).eval(), {
+            "context": torch.tensor(ctx, device=device)}
+
+    if key == "Florence-2":
+        repo = "microsoft/Florence-2-large"
+        proc = transformers.AutoProcessor.from_pretrained(
+            repo, trust_remote_code=True)
+        cfg = transformers.AutoConfig.from_pretrained(
+            repo, trust_remote_code=True)
+        cls = transformers.AutoModelForCausalLM
+        m = _load_weights(cls.from_config(cfg, trust_remote_code=True), repo)
+        if device == "cuda":
+            m = m.half()
+        b, _ = _bs(1, 128)
+        inputs = proc(text=["<CAPTION>"] * b, images=[_dummy_image()] * b,
+                      return_tensors="pt")
+        out = _to_device(inputs, device, torch)
+        if device == "cuda" and "pixel_values" in out:
+            out["pixel_values"] = out["pixel_values"].half()
+        return m.to(device).eval(), out
+
+    if key == "Qwen-Audio-Chat":
+        from transformers.dynamic_module_utils import get_class_from_dynamic_module
+
+        # Same construction paper_eval/registry.py uses: the class comes from the
+        # Hub module by name at a pinned revision, and flash attention is off
+        # because the wheel is not installed here. AutoModelForCausalLM does not
+        # resolve to the same class for this repo.
+        repo = "Qwen/Qwen-Audio-Chat"
+        rev = "8b1c0dc720d34da5498f93535f416e3590bf3a71"
+        cfg = transformers.AutoConfig.from_pretrained(
+            repo, trust_remote_code=True, revision=rev)
+        cfg.use_flash_attn = False
+        cls = get_class_from_dynamic_module(
+            "modeling_qwen.QWenLMHeadModel", repo, revision=rev)
+        m = _load_weights(cls(cfg), repo, rev)
+        if device == "cuda":
+            m = m.half()
+        b, _ = _bs(1, 8)
+        # Text only, no audio token: the turn shape whose audio-fusion guard
+        # costs the two breaks Table 2 reports for this row.
+        return m.to(device).eval(), {
+            "input_ids": torch.randint(0, 1000, (b, 8), device=device)}
+
+    return None
+
+
 def build(key, device):
     import torch
+    _extra = _build_extra(key, device, torch)
+    if _extra is not None:
+        return _extra
+    if key in _TEXT_ROWS:
+        return _text_row(key, device, torch)
+    if key in _WHISPER_ROWS:
+        return _whisper_row(key, device, torch)
     if key in ("grounding-dino-tiny", "grounding-dino-base"):
         import numpy as np
         from PIL import Image

@@ -107,7 +107,9 @@ RUN pip install \
         "accelerate==1.14.0" \
         "pillow==12.1.1" \
         "chronos-forecasting==2.3.1" \
-        "transformers-stream-generator==0.0.5"
+        "transformers-stream-generator==0.0.5" \
+        "tiktoken==0.12.0" \
+        "matplotlib==3.10.7"
 
 # Prove the index pin held: a CPU wheel reports cuda None. A CUDA build here
 # would still run, and would make the image ten times larger for nothing.
