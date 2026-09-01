@@ -311,6 +311,26 @@ def build(key, device):
         return m.to(device).eval(), {
             "input_ids": torch.randint(0, 100, (b, s), device=device),
             "attention_mask": torch.ones(b, s, dtype=torch.long, device=device)}
+    if key in ("grounding-dino-tiny", "grounding-dino-base"):
+        import numpy as np
+        from PIL import Image
+        from transformers import (AutoConfig, AutoProcessor,
+                                  AutoModelForZeroShotObjectDetection)
+        repo = ("IDEA-Research/grounding-dino-tiny" if key.endswith("tiny")
+                else "IDEA-Research/grounding-dino-base")
+        # fp32: the text encoder emits float32 and fp16 breaks the fusion
+        # layers. The batch comes from the model's own processor.
+        cfg = AutoConfig.from_pretrained(repo)
+        proc = AutoProcessor.from_pretrained(repo)
+        m = AutoModelForZeroShotObjectDetection.from_config(cfg)
+        b, _ = _bs(1, 0)
+        rng = np.random.default_rng(0)
+        img = Image.fromarray(rng.integers(0, 255, (480, 640, 3), dtype=np.uint8))
+        enc = proc(images=[img] * b, text=["a cat. a dog."] * b,
+                   return_tensors="pt")
+        inputs = {k: (v.to(device) if hasattr(v, "to") else v)
+                  for k, v in enc.items()}
+        return m.to(device).eval(), inputs
     raise SystemExit(f"unknown model {key}")
 
 
