@@ -349,7 +349,13 @@ def arm():
     if os.environ.get("PAPER_EVAL_DIR"):
         sys.path.insert(0, os.environ["PAPER_EVAL_DIR"])
     key = os.environ["GM_MODEL"]
-    dev = "cuda" if torch.cuda.is_available() else "cpu"
+    # GM_BENCH10_DEVICE lets the ON arm be pinned to whatever the OFF arm
+    # actually used. Each arm is a separate process, so without the pin a GPU
+    # that is busy for one arm and free for the other puts them on different
+    # devices, and the output comparison then reports CHANGED for what is only
+    # a cpu-vs-cuda floating point difference.
+    dev = os.environ.get("GM_BENCH10_DEVICE") or (
+        "cuda" if torch.cuda.is_available() else "cpu")
     torch.manual_seed(0)
     model, inputs = build(key, dev)
 
@@ -744,11 +750,32 @@ def main():
         # ended up comparing 1252 samples against 1332.
         if o.auto_batch and isinstance(off, dict) and off.get("auto_batch"):
             os.environ["GM_BENCH10_BATCH"] = str(off["auto_batch"])
+        # Same requirement applies to the device: both arms must run on the
+        # same one for the output hashes to be comparable at all.
+        if isinstance(off, dict) and off.get("device"):
+            os.environ["GM_BENCH10_DEVICE"] = off["device"]
         on = run(key, True, o.count)
+        os.environ.pop("GM_BENCH10_DEVICE", None)
         if o.auto_batch:
             os.environ.pop("GM_BENCH10_BATCH", None)
         if o.json:
             collected[key] = {"off": off, "on": on}
+            # Report the row as it lands. The aggregate object is only printed
+            # after every model finishes, so a multi-row run used to show
+            # nothing at all until the last one was done. This line is not
+            # valid JSON, so a reader scanning for the final object skips it.
+            if off.get("error") or on.get("error"):
+                print(f"ROW {key} ERR off={off.get('error')} "
+                      f"on={on.get('error')}", flush=True)
+            else:
+                ob, nb = off.get("breaks"), on.get("breaks")
+                oh, nh = off.get("out_hash"), on.get("out_hash")
+                same = "identical" if (oh is not None and oh == nh) else (
+                    "CHANGED" if (oh is not None and nh is not None) else "n/a")
+                fixed = (ob - nb) if (ob is not None and nb is not None) else None
+                pct = f"{round(100 * fixed / ob)}%" if ob else "-"
+                print(f"ROW {key:24} breaks {ob} -> {nb}  fixed {fixed} "
+                      f"({pct})  {same}", flush=True)
             continue
         if off.get("error") or on.get("error"):
             print(f"{key}: ERR\n  off: {off.get('error')}\n  on: {on.get('error')}")
