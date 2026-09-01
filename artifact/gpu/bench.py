@@ -961,8 +961,18 @@ def run(key, on, count):
         _pat = r"^[A-Za-z_][\w.]*(Error|Exception|Interrupt):"
         exc = next((s for s in (ln.strip() for ln in reversed(err.splitlines()))
                     if _re.match(_pat, s)), "")
-        return {"key": key,
-                "error": (exc + "\n" if exc else "") + err[-500:]}
+        # The pattern above only matches CPython's "SomeError: message". An arm
+        # that fails under `jac run` is formatted by the Jac runtime instead, so
+        # nothing matches and the tail alone is frames with the reason cut off
+        # above them. Keep the head too when there is no matched line, since
+        # that is where the reason sits.
+        if exc:
+            detail = exc + "\n" + err[-500:]
+        elif len(err) > 900:
+            detail = err[:400] + "\n  ...\n" + err[-500:]
+        else:
+            detail = err
+        return {"key": key, "error": detail}
     finally:
         for d in (wd, icache, tcache):
             shutil.rmtree(d, ignore_errors=True)
