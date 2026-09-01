@@ -60,7 +60,23 @@ no network. It does need `git`, which is how the patch is applied.
 INFO
 
 echo "==> writing $OUT"
-tar -czf "$OUT" -C "$STAGE" "$NAME"
+# COPYFILE_DISABLE and --no-xattrs: macOS tar otherwise writes an AppleDouble
+# `._name` companion for every file carrying an extended attribute, and a
+# checkout on this machine carries com.apple.provenance on all of them. Those
+# companions are binary, they extract as real files next to the sources, and
+# the Jac compiler globs `*.impl.jac` -- so it picks up `._foo.impl.jac` and
+# dies with UnicodeDecodeError on a tree that looks correct. Measured on this
+# archive before the fix: 6,148 companions, 3,988 of them beside .jac sources.
+# A deposit built on a Mac was therefore unusable on Linux.
+COPYFILE_DISABLE=1 tar --no-xattrs -czf "$OUT" -C "$STAGE" "$NAME" 2>/dev/null \
+    || COPYFILE_DISABLE=1 tar -czf "$OUT" -C "$STAGE" "$NAME"
+
+# Fail loudly rather than shipping a broken deposit.
+if tar -tzf "$OUT" | grep -q '/\._'; then
+    echo "    ERROR: the archive contains AppleDouble ._* files, which break"
+    echo "    the Jac compiler on extraction. Do not upload this."
+    exit 1
+fi
 echo "    $(du -h "$OUT" | cut -f1)  $OUT"
 echo
 echo "Upload this to Zenodo, then fill {{DOI}} in artifact/appendix.tex (A.2, A.3.1)."
