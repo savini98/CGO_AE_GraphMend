@@ -388,6 +388,10 @@ def _build_extra(key, device, torch):
             "context": torch.tensor(ctx, device=device)}
 
     if key == "Florence-2":
+        # Batch 4, from florence_2_large_script.py's BATCH_SIZE, not the 1 the
+        # generic default gives. At batch 1 the original arm compiles to a
+        # single CUDA graph, so there is no break for GraphMend to remove and
+        # the row measures overhead against nothing.
         repo = "microsoft/Florence-2-large"
         proc = transformers.AutoProcessor.from_pretrained(
             repo, trust_remote_code=True)
@@ -397,7 +401,7 @@ def _build_extra(key, device, torch):
         m = _load_weights(cls.from_config(cfg, trust_remote_code=True), repo)
         if device == "cuda":
             m = m.half()
-        b, _ = _bs(1, 128)
+        b, _ = _bs(4, 128)
         inputs = proc(text=["<CAPTION>"] * b, images=[_dummy_image()] * b,
                       return_tensors="pt")
         out = _to_device(inputs, device, torch)
