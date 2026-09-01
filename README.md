@@ -54,14 +54,16 @@ fails at `COPY jaseci`. An existing clone is fixed with
 Natively, without Docker:
 
 ```bash
-bash scripts/setup.sh        # submodule + patch + typeshed stubs
-bash scripts/run_quick.sh    # functional check, ~10-20 min
-bash scripts/run_full.sh     # full reproduction
+bash scripts/setup.sh                                # submodule + patch + stubs
+bash artifact/run_break_analysis.sh --c1 t5-small    # one row, a few minutes
+bash artifact/run_break_analysis.sh                  # C1 and C2, every row
+python artifact/run_latency_analysis.py              # C3, the 10-row sample
 ```
 
-**Give Docker at least 12 GB of memory.** `Phi-4-mini-instruct` peaks near
-9.7 GB while GraphMend compiles the imported `transformers` modeling code, and
-below that the container is SIGKILLed. Check the current limit with
+**Give Docker at least 20 GB of memory.** GraphMend compiles the imported
+`transformers` modeling code and that is what sets the floor, not the weights:
+`grounding-dino-base` peaks above 11.7 GB. Below the floor the container is
+SIGKILLed. Check the current limit with
 `docker info | grep "Total Memory"`.
 
 Expect `All checks passed.` and exit status 0: four rule-level suites
@@ -110,7 +112,8 @@ results — an output file we produced is not something a reviewer can check —
 the latency path is a script that measures on your own card:
 
 ```bash
-bash artifact/gpu/run_reproducible.sh          # needs one CUDA device
+python artifact/run_latency_analysis.py        # 10-row sample; needs one CUDA device
+python artifact/run_latency_analysis.py --full # every row
 ```
 
 It gates on what is hardware-independent: graph breaks reaching zero, and
@@ -137,9 +140,10 @@ and no gate where any fixed threshold would fail honest hardware.
 
 | Path | What it is |
 |---|---|
-| [`artifact/`](artifact/) | The artifact-evaluation package: guide, results, appendix, Dockerfiles, one-command runner |
-| [`artifact/run_all.sh`](artifact/run_all.sh) | Kick the tires: PASS/FAIL per check, non-zero exit on failure |
-| [`artifact/gpu/run_reproducible.sh`](artifact/gpu/run_reproducible.sh) | The GPU counterpart: measures latency on your own card, gates on the mechanism, non-zero exit on failure |
+| [`artifact/`](artifact/) | The artifact-evaluation package: guide, results, appendix, the image, one command per claim |
+| [`artifact/run.sh`](artifact/run.sh) | The image entry point: `c1`, `c2` or `c3` |
+| [`artifact/run_break_analysis.sh`](artifact/run_break_analysis.sh) | C1 and C2; `--c1` / `--c2` to run one |
+| [`artifact/run_latency_analysis.py`](artifact/run_latency_analysis.py) | C3, on your own card; 10-row sample by default, `--full` for every row |
 | [`jaseci/`](jaseci) | Upstream jaclang toolchain, submodule pinned to `e2b6b9f4b` |
 | [`patches/graphmend.patch`](patches/graphmend.patch) | The GraphMend diff against that commit: the passes, their integration points, and the rule-level test suites |
 | [`scripts/setup.sh`](scripts/setup.sh) | Assembles the two into a working toolchain |

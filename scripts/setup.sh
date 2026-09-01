@@ -110,8 +110,9 @@ cat <<EOF
     harness     $REPO/paper_eval
 
     Next:
-      bash artifact/run_all.sh --suites    # fastest real check
-      bash artifact/run_all.sh             # 4 rule suites + 5 models
+      bash artifact/run_break_analysis.sh --c1 t5-small   # one row, a few minutes
+      bash artifact/run_break_analysis.sh                 # C1 and C2, every row
+      python artifact/run_latency_analysis.py             # C3, the 10-row sample
 
     torch and transformers must be importable. If they are not, use the
     container instead, which pins them:

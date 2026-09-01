@@ -38,7 +38,7 @@ if not torch.cuda.is_available():
     sys.exit(
         "no CUDA device visible. This script measures latency and needs a GPU.\n"
         "The break-elimination, correctness and full-graph claims do not:\n"
-        "  bash scripts/run_quick.sh"
+        "  bash artifact/run_break_analysis.sh --c1 t5-small"
     )
 PY
 }

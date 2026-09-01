@@ -54,8 +54,8 @@ result in 10--20 minutes.
     3090, A40, H100; CUDA 12.6, Triton 3.7).
   \item {\bf Run-time state:} cold-cache sensitive; each arm gets a private
     TorchInductor cache so cold start is genuinely cold.
-  \item {\bf Execution:} \texttt{scripts/run\_quick.sh}, then
-    \texttt{scripts/run\_full.sh}.
+  \item {\bf Execution:} \texttt{artifact/run\_break\_analysis.sh}, then
+    \texttt{artifact/run\_latency\_analysis.py}.
   \item {\bf Metrics:} graph-break count (FX graphs $-1$); fix rate; output
     fingerprint equality; full-graph capture; cold-start and steady-state
     latency; CUDA-graph launches per forward; throughput; compiler overhead.
@@ -125,7 +125,7 @@ The functional workflow answers whether GraphMend works, on a CPU with no
 network, and exits non-zero on failure:
 
 \begin{verbatim}
-bash scripts/run_quick.sh     # 10-20 minutes
+bash artifact/run_break_analysis.sh --c1 t5-small
 \end{verbatim}
 
 \noindent It runs \texttt{t5-small}
