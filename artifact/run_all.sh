@@ -73,6 +73,30 @@ fi
 echo "  repo        $REPO"
 echo "  interpreter $($PYTHON -c 'import sys;print(sys.executable)') ($($PYTHON -c 'import platform;print(platform.python_version())'))"
 
+# Python floor. 3.13 is what every recorded result was measured on, and the
+# toolchain's compiler path runs there: the `>=3.14` floor in the submodule's
+# jac.toml describes the shipped single binary, whose payload assembler and
+# boot-time extractor use `compression.zstd`, a 3.14 stdlib module. This
+# artifact never builds or runs that binary.
+#
+# 3.11 is a HARD floor, and the reason is not cosmetic. Configuration is read
+# with `tomllib`, which arrived in 3.11, and `sitecustomize` wraps that read in
+# a bare `except`. Below 3.11 the `[dev] jaclang_source` stanza therefore fails
+# silently, and with it the mechanism that keeps the patched toolchain ahead of
+# any pip-installed `jaclang` -- every released one predates GraphMend. The
+# failure mode is a clean run against the wrong compiler.
+PY_MINOR="$($PYTHON -c 'import sys;print(sys.version_info[1])')"
+PY_MAJOR="$($PYTHON -c 'import sys;print(sys.version_info[0])')"
+if [ "$PY_MAJOR" -ne 3 ] || [ "$PY_MINOR" -lt 11 ]; then
+    echo
+    echo "  Python ${PY_MAJOR}.${PY_MINOR} is too old. 3.11 is the hard floor:"
+    echo "  below it, tomllib is missing, the [dev] jaclang_source stanza fails"
+    echo "  silently, and a pip-installed jaclang can shadow the patched"
+    echo "  toolchain without any diagnostic. Use 3.13, or the container."
+    exit 2
+fi
+[ "$PY_MINOR" = "13" ] || echo "  NOTE: results were measured on Python 3.13, not 3.${PY_MINOR}"
+
 # importlib.metadata reads the installed distribution metadata; it does not
 # import torch, so this stays cheap even where torch takes seconds to load.
 VERSIONS="$($PYTHON - <<'PY'

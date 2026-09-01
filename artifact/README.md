@@ -23,8 +23,9 @@ Models run unmodified: `jac run model.py` in place of `python model.py`.
 
 ### Prerequisites
 
-- **Docker**, or Python 3.13 with `torch==2.12.1`, `transformers==4.52.4`,
-  `numpy==2.4.6`, `torchvision==0.27.1` and `git`
+- **Docker**, or **Python 3.13** with `torch==2.12.1`,
+  `transformers==4.52.4`, `numpy==2.4.6`, `torchvision==0.27.1` and `git`.
+  3.11 is a hard floor and `run_all.sh` enforces it
 - **12 GB of memory.** `Phi-4-mini-instruct` peaks near 9.7 GB while GraphMend
   compiles the imported `transformers` modeling code. Below that the container
   is SIGKILLed and the row reports `ERR` with exit 137. Check with
@@ -397,6 +398,13 @@ torch.jit.script_method is deprecated`.** Seen on native runs against a torch
 CUDA build: the warning comes from inside torch and the Jac test runner
 escalates it. No rule is involved. The container is the supported path and
 gives `18 passed, 0 skipped`.
+
+**The submodule's `jac.toml` says `requires_python = ">=3.14"`, but this runs
+on 3.13.** Both are correct. That floor describes the shipped single binary,
+whose payload assembler and boot-time extractor use `compression.zstd`, a
+stdlib module added in Python 3.14. This artifact never builds or runs that
+binary: it uses the compiler path, which has no 3.14 dependency and which every
+recorded result was measured on under 3.13.
 
 **`import jaclang` resolves to a released jaclang.** Every released `jaclang`
 predates GraphMend. Check with:
