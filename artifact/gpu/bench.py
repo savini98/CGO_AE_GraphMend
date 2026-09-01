@@ -183,6 +183,14 @@ def _auto_batch(model, inputs, torch, key, target=0.70):
     try:
         total = torch.cuda.get_device_properties(0).total_memory
         torch.cuda.empty_cache()
+        # Free memory, not just total. Sizing against the card's capacity
+        # assumes this process owns it, and on a GPU with anything else
+        # resident -- another job, a notebook, a display server -- the estimate
+        # exceeds what can be allocated. The verify loop below then halves its
+        # way down, rebuilding the model on every failed attempt, which turns a
+        # seconds-long probe into minutes and lands on a batch the run never
+        # meant to measure.
+        free_mem = torch.cuda.mem_get_info()[0]
         gc.collect()
         torch.cuda.reset_peak_memory_stats()
         baseline = torch.cuda.memory_allocated(0)
@@ -199,14 +207,15 @@ def _auto_batch(model, inputs, torch, key, target=0.70):
         mult = (80.0 if model_gb > 3.0 else
                 40.0 if model_gb > 1.0 else
                 30.0 if model_gb > 0.3 else 10.0)
-        available = (total * target) - baseline
+        available = min((total * target) - baseline, free_mem * target)
         if available <= 0:
             return None
         bs = int(available / (per_sample * mult))
         bs = max(1, min(bs, 2048))
         print(f"# auto-batch: model {model_gb:.2f} GB, per-sample "
               f"{per_sample / 1024:.1f} KB, multiplier {mult:.0f}x, "
-              f"target {target:.0%} of {total / 1024 ** 3:.1f} GB -> batch {bs}")
+              f"target {target:.0%} of {total / 1024 ** 3:.1f} GB total / "
+              f"{free_mem / 1024 ** 3:.1f} GB free -> batch {bs}")
         # Verify rather than trust. The estimate comes from a probe at a small
         # batch, and activation growth is not linear in it, so the number can be
         # too large and the run then dies at allocation time. Halve until a real
