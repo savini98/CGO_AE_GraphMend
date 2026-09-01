@@ -1,8 +1,7 @@
 """GraphMend GPU cold-start and steady-state benchmark, paper methodology.
 
 This implements the paper's own measurement rather than a re-invention of it.
-The definitions come from `models/profiling_utils.py` and
-`cold_start_no_compile.py` in our research repository, and they matter because a
+The definitions match the paper's own profiling, and they matter because a
 naive wall-clock timer measures a different quantity and lands near 1x by
 construction.
 
@@ -76,8 +75,8 @@ def _stamp_now():
 
 ARM = "GM_BENCH10_ARM"
 
-# Per-model batch sizes the paper uses on an RTX 3090, from run_all_3090_new.log
-# in our research repository. The paper sizes each model to about 70%
+# Per-model batch sizes the paper uses on an RTX 3090. The paper sizes each
+# model to about 70%
 # of GPU memory and runs the original and fixed variants at the same batch, so a
 # comparison at any other batch is measuring a different point. --paper-batch
 # selects these; without it the small defaults in build() apply, which are fine
@@ -236,7 +235,7 @@ def _auto_batch(model, inputs, torch, target=0.70):
 # counts, so these rows are built the same way here: real pretrained weights,
 # half precision on the device.
 #
-# jac/paper_eval/registry.py keeps its fp32 small-config versions of these rows,
+# paper_eval/registry.py keeps its fp32 small-config versions of these rows,
 # because the paper's correctness claim is that FP32 outputs are bit-identical
 # and that is the quantity `output_ok` checks. The two are measuring different
 # things on purpose.
@@ -386,12 +385,40 @@ def arm():
     if os.environ.get("GM_BENCH10_COUNT"):
         graphs = []
         torch._dynamo.reset()
-        c = torch.compile(model, backend=lambda gm, ex: (graphs.append(gm), gm.forward)[1],
-                          dynamic=False)
+        # `dynamic` is left at its DEFAULT here, deliberately, even though the
+        # latency path below pins it to False. The reference counts breaks with
+        # `dynamo.explain(model)(**batch)` (gpu_utils.safe_explain), which does
+        # not pin it, and on a dynamic-shape model the two disagree: forcing
+        # dynamic=False specialises on shape and adds breaks that the reference
+        # never sees. grounding-dino-tiny reads 19 with dynamic=False and 17,
+        # which is Table 2's count, with the default.
+        c = torch.compile(model,
+                          backend=lambda gm, ex: (graphs.append(gm), gm.forward)[1])
         with torch.no_grad():
-            c(**inputs)
+            out = c(**inputs)
         res["graphs"] = len(graphs)
         res["breaks"] = max(0, len(graphs) - 1)
+        # Output fingerprint, so the reference rows can carry the same
+        # correctness evidence as the small-config rows rather than only a
+        # break count. Both arms build from the same seed and the same
+        # checkpoint, so a difference here is the transform changing behaviour,
+        # which is exactly the thing the paper claims does not happen.
+        import hashlib
+        t = out if isinstance(out, torch.Tensor) else None
+        for attr in ("logits", "last_hidden_state"):
+            if hasattr(out, attr):
+                t = getattr(out, attr)
+                break
+        if t is None and isinstance(out, (tuple, list)) and out:
+            t = out[0]
+        if t is None and hasattr(out, "values"):
+            for v in out.values():
+                if isinstance(v, torch.Tensor):
+                    t = v
+                    break
+        res["out_hash"] = (
+            hashlib.sha256(t.detach().float().cpu().numpy().tobytes()).hexdigest()[:16]
+            if isinstance(t, torch.Tensor) else None)
     else:
         cmode = os.environ.get("GM_BENCH10_MODE", "reduce-overhead")
         runs = int(os.environ.get("GM_BENCH10_RUNS", "8"))
@@ -678,7 +705,7 @@ def main():
                     help="keep each arm's PyTorch profiler trace under DIR, "
                          "named <model>_trace_<original|fixed>_<stamp>.json, "
                          "the same convention as the reference traces in "
-                         "artifact/traces/. Feed them to from_trace.py to "
+                         "a trace directory/. Feed them to from_trace.py to "
                          "re-derive cold and steady-state the way the paper "
                          "does, from your own run rather than from ours.")
     ap.add_argument("--runs", type=int, default=None,
@@ -760,14 +787,9 @@ def main():
             #
             # RAW WINDOW is Table 2's metric: the interval between the first two
             # "Torch-Compiled Region: 0/0" markers, original over fixed, with
-            # nothing subtracted. On our own 3090 MoLFormer traces it gives
-            # 6200.7 / 250.9 = 24.71x, the value printed in Table 2, which is
-            # what identifies this as Table 2's definition. Those traces are
-            # not shipped: a recorded output is not something a reviewer can
-            # check, so the number to trust here is the one this run produces.
+            # nothing subtracted. This is the definition Table 2 reports.
             #
-            # NO-COMPILE subtracts backend_compile from both arms, following
-            # cold_start_no_compile.py in our research repository, on the
+            # NO-COMPILE subtracts backend_compile from both arms, on the
             # grounds that merging subgraphs does not reduce total compile work.
             # It is the more conservative number and it is much smaller.
             print(f"  cold, RAW WINDOW  off={off['cold_window_ms']:9.1f}ms "

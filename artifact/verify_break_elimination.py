@@ -14,20 +14,19 @@ outright rather than being reported as a successful reduction.
 
 Correctness is THREE-STATE, not two, and the distinction matters. A row can be
 `identical` (both arms produced the same fingerprint), `CHANGED` (they differ,
-which fails the run), or `n/a` (no fingerprint was available to compare). An
-earlier version of this file collapsed the third case into the first on one
-path and into the second on the other, so the same condition produced a false
-pass through the CPU harness and a false failure through the reference build.
+which fails the run), or `n/a` (no fingerprint was available to compare). The
+third case is neither passed nor failed: a row with nothing to compare is not
+evidence either way.
 
 Both arms go through `jac run` with a jac.toml differing only in
 `graphmend_claim_imports`, so what is measured is the compiler's own
 transformation of imported model code, not a hand-edited model file. See
-`jac/paper_eval/README.md` for why the entry program has to be Jac-compiled.
+`paper_eval/README.md` for why the entry program has to be Jac-compiled.
 
 WHY ROWS TAKE DIFFERENT PATHS. A break count is a property of the code
 TorchDynamo actually traces, so it depends on how a model is built and what it
 is fed. Most rows are insensitive to that and the small random-weight harness
-in `jac/paper_eval/` measures them directly. Five are sensitive and use a
+in `paper_eval/` measures them directly. Five are sensitive and use a
 reference-fidelity build in `gpu/bench.py` instead, each for a reason found by
 reading the reference scripts rather than guessed:
 
@@ -52,7 +51,7 @@ import subprocess
 import sys
 
 # Every row this can measure. Only the names are used: the published counts
-# live in artifact/RESULTS.md, and this script reports what GraphMend did
+# live in artifact/README.md, and this script reports what GraphMend did
 # rather than grading itself against a table.
 MODELS = (
     "t5-small", "t5-base", "t5-3b", "flan-t5-large",
@@ -96,12 +95,32 @@ def harness_dir():
     return None
 
 
-def _fail(label, proc):
+def _fail(label, rc, lines):
     """Report a dead subprocess with its reason, not just an empty result."""
-    print(f"  {label} failed (exit {proc.returncode}).")
-    tail = (proc.stderr or proc.stdout or "").strip().splitlines()
-    for line in tail[-8:]:
+    print(f"  {label} failed (exit {rc}).")
+    for line in [l for l in lines if l.strip()][-8:]:
         print(f"    {line[:160]}")
+
+
+def _stream(cmd, cwd, env, label):
+    """Run a child, echoing its output live, and return (lines, returncode).
+
+    subprocess.run(capture_output=True) holds everything until the child exits,
+    so a sweep that takes tens of minutes prints nothing until the very end and
+    a reviewer cannot tell a working run from a hung one. Merge stderr into
+    stdout, forward every line as it arrives, and keep the lines for parsing.
+    """
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         text=True, bufsize=1, cwd=cwd, env=env)
+    lines = []
+    for line in p.stdout:
+        line = line.rstrip("\n")
+        lines.append(line)
+        # ROW lines are the per-model results; show them plainly and prefix the
+        # rest so the child's chatter is distinguishable from our own output.
+        print(line if line.startswith("ROW ") else f"  | {line}", flush=True)
+    p.wait()
+    return lines, p.returncode
 
 
 def run_small(keys, jac):
@@ -114,12 +133,15 @@ def run_small(keys, jac):
     # PYTHONUNBUFFERED: stdout here is a pipe, so without it Python
     # block-buffers and a long run emits nothing until it exits.
     env = dict(os.environ, PYTHONPATH=jac, PYTHONUNBUFFERED="1")
-    p = subprocess.run([sys.executable, "-m", "paper_eval.run_eval", *keys],
-                       capture_output=True, text=True, cwd=jac, env=env)
+    lines, rc = _stream([sys.executable, "-m", "paper_eval.run_eval", *keys],
+                        jac, env, "paper_eval.run_eval")
     out = {}
-    for line in p.stdout.splitlines():
-        # run_eval prints: key before after fixed% output_ok input
-        m = re.match(r"^(\S+)\s+(\d+)\s+(\d+)\s+\d+%\s+(\S+)", line)
+    for line in lines:
+        # run_eval prints each row twice: once as `ROW key ...` the moment it
+        # is measured, and once in the closing table without the prefix. Accept
+        # either, so a result is picked up even if the run is cut short before
+        # the table is written. Re-reading the same row is idempotent.
+        m = re.match(r"^(?:ROW\s+)?(\S+)\s+(\d+)\s+(\d+)\s+\d+%\s+(\S+)", line)
         if m and m.group(1) in MODELS:
             flag = m.group(4)
             ok = True if flag == "yes" else False if flag == "NO" else None
@@ -127,8 +149,8 @@ def run_small(keys, jac):
     # A non-zero exit with no parsed rows means the harness died: an OOM kill
     # at the memory ceiling, a missing model, an import error. run_eval writes
     # that reason to stderr, so surface it instead of leaving bare ERR rows.
-    if p.returncode != 0 and not out:
-        _fail("paper_eval.run_eval", p)
+    if rc != 0 and not out:
+        _fail("paper_eval.run_eval", rc, lines)
     return out
 
 
@@ -139,12 +161,12 @@ def run_reference(keys, jac):
     bench = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                          "gpu", "bench.py")
     env = dict(os.environ, PYTHONPATH=jac, PYTHONUNBUFFERED="1")
-    p = subprocess.run([sys.executable, bench, "--count", "--json",
-                        *[REF_BUILD[k] for k in keys]],
-                       capture_output=True, text=True, cwd=jac, env=env)
+    lines, rc = _stream([sys.executable, bench, "--count", "--json",
+                         *[REF_BUILD[k] for k in keys]],
+                        jac, env, "gpu/bench.py --count")
     out = {}
     inv = {v: k for k, v in REF_BUILD.items()}
-    for line in reversed(p.stdout.strip().splitlines()):
+    for line in reversed([l for l in lines if l.strip()]):
         try:
             data = json.loads(line)
         except (ValueError, TypeError):
@@ -159,8 +181,8 @@ def run_reference(keys, jac):
                 ok = None if (ho is None or hn is None) else (ho == hn)
                 out[inv[bench_key]] = (r["off"]["breaks"], r["on"]["breaks"], ok)
         break
-    if p.returncode != 0 and not out:
-        _fail("gpu/bench.py --count", p)
+    if rc != 0 and not out:
+        _fail("gpu/bench.py --count", rc, lines)
     return out
 
 
