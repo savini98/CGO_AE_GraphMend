@@ -5,6 +5,8 @@
 #   bash artifact/run_break_analysis.sh                 # every model
 #   bash artifact/run_break_analysis.sh t5-small biogpt  # a subset
 #   bash artifact/run_break_analysis.sh --offline        # no downloads
+#   bash artifact/run_break_analysis.sh --c1             # C1 only
+#   bash artifact/run_break_analysis.sh --c2             # C2 only
 #
 # THE CLAIM: GraphMend eliminates graph breaks, and the transformed program
 # produces the same output as the original.
@@ -37,6 +39,22 @@ REPO="$(cd "$ART_DIR/.." && pwd)"
 JAC="$REPO/jaseci/jac"
 HARNESS="$REPO"
 PYTHON="${PYTHON:-python3}"
+
+# --c1 / --c2 select one claim; with neither, both run. Everything else (model
+# names, --offline) is forwarded to whichever steps run.
+RUN_C1=0
+RUN_C2=0
+SELECTED=0
+ARGS=()
+for _a in "$@"; do
+    case "$_a" in
+        --c1) RUN_C1=1; SELECTED=1 ;;
+        --c2) RUN_C2=1; SELECTED=1 ;;
+        *)    ARGS+=("$_a") ;;
+    esac
+done
+if [ "$SELECTED" = "0" ]; then RUN_C1=1; RUN_C2=1; fi
+set -- ${ARGS[@]+"${ARGS[@]}"}
 
 rule() { printf '\n%s\n' "------------------------------------------------------------------"; }
 
@@ -109,11 +127,13 @@ if [ ! -d "$JAC/jaclang/vendor/typeshed/stdlib" ]; then
 fi
 echo "  typeshed    present"
 
+STATUS=0
+if [ "$RUN_C1" = "1" ]; then
 rule
-echo "STEP 1  break elimination and output correctness"
+echo "C1  graph breaks repaired, model behaviour preserved"
 rule
 echo "  each row compiles its model twice, GraphMend off then on, so this is"
-echo "  slow on a cold cache. Results print as one table when the run finishes."
+echo "  slow on a cold cache. Each row prints as it finishes."
 echo
 
 # PYTHONUNBUFFERED so a long run is not silent, and PYTHONPATH so the vendored
@@ -121,11 +141,12 @@ echo
 PYTHONUNBUFFERED=1 PYTHONPATH="$JAC:$HARNESS${PYTHONPATH:+:$PYTHONPATH}" \
     "$PYTHON" "$ART_DIR/verify_break_elimination.py" "$@"
 STATUS=$?
+fi
 
 # ---------------------------------------------------------------------------
-# Step 2: the sub-claim -- full-graph capture (paper Section 5.6).
+# C2 -- full-graph capture (paper Section 5.6).
 #
-# Break elimination is the claim; this is what it buys. vLLM and SGLang require
+# This is what C1 buys. vLLM and SGLang require
 # torch.compile(fullgraph=True), which a single graph break defeats, so a model
 # whose breaks are gone should now capture where it previously could not. The
 # check is asymmetric on purpose: the untransformed arm must FAIL and the
@@ -133,8 +154,10 @@ STATUS=$?
 # a win. backend="eager" isolates Dynamo's capture from backend compilation,
 # which makes it deterministic and keeps it off the GPU.
 # ---------------------------------------------------------------------------
+FG_STATUS=0
+if [ "$RUN_C2" = "1" ]; then
 rule
-echo "STEP 2  full-graph capture (sub-claim, paper 5.6)"
+echo "C2  full-graph capture for models whose breaks are fully repaired"
 rule
 echo "  torch.compile(fullgraph=True) should fail before the transform and"
 echo "  succeed after it, on every row."
@@ -147,18 +170,19 @@ echo
 PYTHONUNBUFFERED=1 PYTHONPATH="$JAC:$HARNESS${PYTHONPATH:+:$PYTHONPATH}" \
     "$PYTHON" -m paper_eval.run_fullgraph "$@"
 FG_STATUS=$?
+fi
 [ "$STATUS" = "0" ] || FG_STATUS="$STATUS"
 
 rule
 echo "SUMMARY"
 rule
 if [ "$FG_STATUS" = "0" ]; then
-    echo "Break elimination verified, every compared output was identical, and"
-    echo "every transformed model captured as a full graph where the original"
-    echo "could not."
+    [ "$RUN_C1" = "1" ] && echo "C1: graph breaks were repaired and every compared output was identical."
+    [ "$RUN_C2" = "1" ] && echo "C2: every fully repaired model captured as a full graph where the"
+    [ "$RUN_C2" = "1" ] && echo "    original could not."
 else
-    echo "The claim is NOT established by this run: a row failed to run or"
-    echo "changed its output. The table above says which."
+    echo "NOT established by this run: a row failed to run or changed its"
+    echo "output. The table above says which."
     echo "artifact/README.md has a troubleshooting section; the two gotchas at"
     echo "the top of it account for most unexpected rows."
 fi
