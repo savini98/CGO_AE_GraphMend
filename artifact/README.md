@@ -78,6 +78,12 @@ bash artifact/run_break_analysis.sh --c1 --offline    # skip rows that download
 bash artifact/run_break_analysis.sh --c1 t5-small     # a subset
 ```
 
+To see why a particular break survives:
+
+```bash
+python -m paper_eval.run_why longformer-base-4096 on
+```
+
 **C2, full-graph capture.** Checks `torch.compile(fullgraph=True)` on both
 arms. It should fail on the original and succeed on the transformed model.
 Rows that C1 only partially repairs are excluded. No GPU needed.
@@ -132,25 +138,18 @@ template to copy.
    site, which only happens in a module Jac compiled. Under plain CPython no
    hook is registered and every logger break survives.
 
-## Checking the fixed sources
+## The fixed model sources
 
-C3 does not run the compiler in the measured window. The fixed arm is stock
-`transformers` with GraphMend's output copied over the modules it transformed,
-from [`fixed_models/`](fixed_models/). Every file ships beside its
-`.original.py`, and both can be regenerated and checked:
+C3 times stock `transformers` against the same tree with GraphMend's output
+copied over the modules it transformed. That output is committed under
+[`fixed_models/`](fixed_models/), each file next to its `.original.py`, so the
+timed window is the model code rather than a compiler run.
 
-```bash
-python artifact/gen_fixed_models.py    # regenerate, then diff against what is committed
-python artifact/verify_fixed.py        # gate: they must remove the same breaks
-```
-
-Run `verify_fixed.py` before trusting a C3 number. A fixed source that leaves
-breaks behind still produces a tidy speedup, and that speedup means nothing.
-
-To see why a particular break survives:
+The files come from the compiler, and these two scripts produce and check them:
 
 ```bash
-python -m paper_eval.run_why longformer-base-4096 on
+python artifact/gen_fixed_models.py    # regenerate them, then diff
+python artifact/verify_fixed.py        # check they remove the same breaks
 ```
 
 ## Requirements
