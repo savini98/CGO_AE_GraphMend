@@ -6,10 +6,8 @@ and the artifact root, so that `import paper_eval.registry` resolves inside the
 arm.
 
 Both are derived from this module's own location rather than from the working
-directory. The harness used to take them from `os.getcwd()`, which meant it
-only ran from one directory and failed with "No module named jaclang" anywhere
-else. Now `python -m paper_eval.run_eval` works from the repository root, from
-this package, or from anywhere with the root on PYTHONPATH.
+directory, so `python -m paper_eval.run_eval` works from the repository root,
+from this package, or from anywhere with the root on PYTHONPATH.
 
 GM_JACLANG_DIR overrides the toolchain location, for a reviewer who keeps the
 patched tree somewhere other than the submodule.

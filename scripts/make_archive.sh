@@ -64,10 +64,8 @@ echo "==> writing $OUT"
 # `._name` companion for every file carrying an extended attribute, and a
 # checkout on this machine carries com.apple.provenance on all of them. Those
 # companions are binary, they extract as real files next to the sources, and
-# the Jac compiler globs `*.impl.jac` -- so it picks up `._foo.impl.jac` and
-# dies with UnicodeDecodeError on a tree that looks correct. Measured on this
-# archive before the fix: 6,148 companions, 3,988 of them beside .jac sources.
-# A deposit built on a Mac was therefore unusable on Linux.
+# the Jac compiler globs `*.impl.jac` -- so it would pick up `._foo.impl.jac`
+# and fail with UnicodeDecodeError on a tree that looks correct.
 COPYFILE_DISABLE=1 tar --no-xattrs -czf "$OUT" -C "$STAGE" "$NAME" 2>/dev/null \
     || COPYFILE_DISABLE=1 tar -czf "$OUT" -C "$STAGE" "$NAME"
 

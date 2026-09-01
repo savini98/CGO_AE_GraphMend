@@ -227,11 +227,6 @@ def _chronos_bolt():
 def _florence2():
     """Florence-2 (DC 7): the largest pure data-dependent control flow row.
 
-    Table 2 puts it at 100% fixed; measured here it is 7 -> 7. The breaks are
-    real and reproduce the paper's count, but `[Where]` declines the guard, for
-    a reason recorded in README ("Florence-2"). The row reports that rather than
-    being tuned until it agrees.
-
     Every one of the breaks is the same site, `Florence2EncoderLayer.forward`:
 
         if hidden_states.dtype == torch.float16 and (
@@ -445,11 +440,10 @@ MODELS = {
     "stella-en-400M-v5": {"build": _stella, "scope": ["transformers_modules"]},
     "moe-minicpm-x4-base": {"build": _moe_minicpm, "scope": ["transformers_modules"]},
     # Reads 2 -> 0, 100%, matching Table 2's DC (2). Both breaks are the DC pair
-    # at the audio-fusion guard (modeling_qwen.py:760). [Where] still declines
-    # the merge, and has to: the true branch dereferences `audio_info`, which is
-    # None here, so selecting between its result and the false arm's None is not
-    # type-legal. [Precond] carries the row instead, by proving that dereference
-    # is unconditional and prepending `audio_info is not None` to the guard.
+    # at the audio-fusion guard (modeling_qwen.py:760). This is the
+    # precondition-conjunct form of [Where]: the true branch dereferences
+    # `audio_info` unconditionally, so the rule leads the guard with
+    # `audio_info is not None` rather than selecting between a tensor and None.
     "Qwen-Audio-Chat": {"build": _qwen_audio, "scope": ["transformers_modules"]},
     # Same modeling code as t5-base / t5-3b / flan-t5-large /
     # inclusively-reformulation-it5 / chronos-bolt-small, which is why one t5
