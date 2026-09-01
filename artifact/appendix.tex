@@ -49,8 +49,8 @@ result in 10--20 minutes.
     \texttt{manual\_seed(0)}.
   \item {\bf Run-time environment:} Linux or macOS, Python 3.13; container
     images provided for CPU and GPU.
-  \item {\bf Hardware:} any x86-64/arm64 CPU with \textbf{12\,GB of memory} for
-    the primary claims; an NVIDIA GPU for latency and throughput (paper: RTX
+  \item {\bf Hardware:} any x86-64/arm64 CPU with \textbf{20\,GB of memory} for
+    C1 and C2; an NVIDIA GPU for C3 (paper: RTX
     3090, A40, H100; CUDA 12.6, Triton 3.7).
   \item {\bf Run-time state:} cold-cache sensitive; each arm gets a private
     TorchInductor cache so cold start is genuinely cold.
@@ -62,11 +62,12 @@ result in 10--20 minutes.
   \item {\bf Output:} a table per experiment on stdout; each script prints the
     claim it checks and the expected result. Reference output in
     \texttt{artifact/README.md}.
-  \item {\bf Experiments:} 4 rule-level suites (18 tests); 21 offline and 6
-    network model rows; break-cause reporting; full-graph capture; compiler
-    overhead; GPU latency and throughput.
-  \item {\bf Disk:} 135\,MB for a clone; 1.4\,GB for the CPU image ($\approx$
-    5\,GB with build cache); a few GB more for the network rows.
+  \item {\bf Experiments:} C1, break repair and behaviour preservation over 21
+    offline and 6 network model rows; C2, full-graph capture; C3, GPU latency
+    and throughput. Break-cause reporting and compiler overhead are provided
+    but are not claims.
+  \item {\bf Disk:} 35\,GB: 135\,MB for a clone, 1.4\,GB for the CPU image
+    (7.3\,GB for the CUDA image), build cache, and the network rows' weights.
   \item {\bf Time to prepare:} $\approx$ 5 minutes (container build).
   \item {\bf Time to complete:} 10--20 minutes functional; 1.5--3 hours for the
     21-row sweep on a cold cache; 30--60 minutes for the GPU experiments.
@@ -88,11 +89,10 @@ pin, applies the patch and fetches the typeshed stubs; it is idempotent, and the
 archived copy is self-contained.
 
 \subsubsection{Hardware dependencies}
-Any x86-64 or arm64 CPU for break elimination, correctness, full-graph capture
-and compiler overhead. \textbf{12\,GB of memory is required}:
-\texttt{Phi-4-mini-instruct} peaks near 9.7\,GB while GraphMend compiles the
-imported modeling code, and less causes an out-of-memory kill. Latency and
-throughput need one NVIDIA GPU; GraphMend is functional on any sufficiently
+Any x86-64 or arm64 CPU for C1 and C2. \textbf{20\,GB of memory is required}:
+GraphMend compiles the imported modeling code, and that is what sets the floor,
+not the weights, with \texttt{grounding-dino-base} peaking above 11.7\,GB.
+Less causes an out-of-memory kill. C3 needs one NVIDIA GPU; GraphMend is functional on any sufficiently
 recent device, but reproducing the magnitudes in Table~\ref{tab:benchmark}
 requires the paper's RTX 3090, A40 or H100 configurations.
 
@@ -128,7 +128,7 @@ network, and exits non-zero on failure:
 bash scripts/run_quick.sh     # 10-20 minutes
 \end{verbatim}
 
-\noindent It runs the four rule-level suites, then \texttt{t5-small}
+\noindent It runs \texttt{t5-small}
 (\textsc{[Defer]}), \texttt{Phi-4-mini-instruct} (\textsc{[Where]}, the
 Figure~\ref{fig:phi4} example), \texttt{longformer-base-4096} and
 \texttt{clap-htsat-fused}. The last two are expected \emph{not} to reach zero;
@@ -148,18 +148,19 @@ Each claim has one script, named for it.
 
 {\small
 \begin{itemize}\itemsep0pt
-  \item \texttt{artifact/run\_break\_analysis.sh} $\rightarrow$
-    Table~\ref{tab:benchmark} and Section~\ref{sec:serving}. One entry point
-    covers the whole claim, because break elimination, output correctness and
-    full-graph capture are three columns of one two-arm run over the same
-    models. Expect \textbf{21 models fully fixed, 3 partially, 3 unfixed},
-    with 25 of 27 rows matching the fix rate
-    (\texttt{grounding-dino} reads 56\% against 58\%, one break in
-    seventeen); a bit-identical output on every row carrying a comparison; and
-    \texttt{fullgraph=True} failing before the transform and succeeding after
-    it on every row. Correctness is load-bearing: a row whose arms disagree
-    fails the run rather than counting as a reduction.
-  \item \texttt{run\_latency.sh} $\rightarrow$
+  \item \texttt{run\_break\_analysis.sh -{}-c1} $\rightarrow$ \textbf{C1},
+    Table~\ref{tab:benchmark}. One two-arm run over 27 models. Expect
+    \textbf{21 models fully repaired, 3 partially, 3 unrepaired}, 105 of 139
+    breaks eliminated, every row matching Table~\ref{tab:benchmark}'s repair
+    rate, and a bit-identical output on every row carrying a comparison.
+    Behaviour preservation is load-bearing: a row whose arms disagree fails the
+    run rather than counting as a reduction.
+  \item \texttt{run\_break\_analysis.sh -{}-c2} $\rightarrow$ \textbf{C2},
+    Section~\ref{sec:serving}. Expect \texttt{fullgraph=True} to fail before
+    the transform and succeed after it on all 21 fully repaired rows. The check
+    is asymmetric: a both-pass result is a failure. Partially repaired rows are
+    excluded, since capture must fail for them either way.
+  \item \texttt{run\_latency.sh} $\rightarrow$ \textbf{C3},
     Sections~\ref{sec:coldstart}--\ref{sec:steadystate}: breaks reach zero,
     CUDA-graph launches per forward collapse to one, and cold start improves.
   \item \texttt{run\_throughput.sh} $\rightarrow$
@@ -177,15 +178,16 @@ floor of $1.5\times$ on any CUDA device rather than an expected value, and
 steady state and throughput are reported without a threshold, since a fixed
 bound would fail an honest run on different hardware.
 
-\paragraph{Absolute break counts.} The CPU sweep runs in FP32, which is what the
-correctness claim concerns, and totals 122 breaks against the 147 of
-Table~\ref{tab:benchmark}, which were measured in half precision; 17 of 26 rows
-match exactly. The largest group that differs is the BART family, whose
-overflow guard leads with \texttt{dtype == torch.float16}. That conjunct is a
-static bool, so in FP32 Dynamo folds it away and the data-dependent breaks
-behind it do not exist. Measured in half precision via
-\texttt{gpu/bench.py -{}-count}, those rows match exactly. The fix rate, which
-is what the \emph{Fixed(\%)} column reports, is unaffected.
+\paragraph{Absolute break counts.} Six rows are measured through
+\texttt{gpu/bench.py}, which builds them at the precision and batch shape
+Table~\ref{tab:benchmark} used, and they reproduce its counts exactly. The
+reason the build matters is the BART family, whose overflow guard leads with
+\texttt{dtype == torch.float16}: that conjunct is a static bool, so in FP32
+Dynamo folds it away and the data-dependent breaks behind it do not exist,
+giving 3 instead of 7. \texttt{grounding-dino} is not precision-gated but needs
+its real config and a batch built by the model's own processor. Four rows read
+below Table~\ref{tab:benchmark} in absolute count while matching its
+\emph{Fixed(\%)} column, which is what the claim concerns.
 
 \subsection{Experiment customization}
 

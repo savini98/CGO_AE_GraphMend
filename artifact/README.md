@@ -25,11 +25,14 @@ Models run unmodified: `jac run model.py` in place of `python model.py`.
 
 - **Docker**, or Python 3.13 with `torch==2.12.1`, `transformers==4.52.4`,
   `numpy==2.4.6`, `torchvision==0.27.1` and `git`
-- **12 GB of memory.** `Phi-4-mini-instruct` peaks near 9.7 GB while GraphMend
-  compiles the imported `transformers` modeling code. Below that the container
-  is SIGKILLed and the row reports `ERR` with exit 137. Check with
-  `docker info | grep "Total Memory"`
-- **No GPU, no model weights, and no network** for the claims below
+- **20 GB of memory.** GraphMend compiles the imported `transformers` modeling
+  code, and that is what sets the floor, not the weights: `grounding-dino-base`
+  peaks above 11.7 GB and `chronos-bolt-small` was still growing past 8.8 GB
+  when starved. Below the floor the container is SIGKILLed and the row reports
+  `ERR` with exit 137. Check with `docker info | grep "Total Memory"`
+- **35 GB of disk**, for the image, the toolchain cache and the model weights
+- **No GPU for C1 and C2.** C3 needs an NVIDIA card. Six of the 27 rows
+  download weights or Hub code; `--offline` skips them
 
 The toolchain is not vendored here. It is upstream `jaseci-labs/jaseci` as a
 submodule frozen at `e2b6b9f4bdec510622410f046c8bd5427980c33f` (jaclang 0.36.1)
@@ -41,10 +44,23 @@ everything GraphMend adds: 203 files, 166 of them new, no deletions.
 ```bash
 git clone --recurse-submodules <url> && cd CGO_AE_GraphMend
 docker build -f artifact/Dockerfile.cpu -t graphmend-cpu .   # ~5 min
-docker run --rm graphmend-cpu                                # runs run_all.sh
-docker run --rm graphmend-cpu --quick                        # shorter
+docker run --rm graphmend-cpu                                # smoke test
 docker run --rm -it --entrypoint bash graphmend-cpu          # poke around
 ```
+
+C1 and C2 run on the CPU image. Four rows (the BART family) and both
+`grounding-dino` rows are measured through `gpu/bench.py`, which reproduces
+Table 2's half-precision counts, and C3 needs a card, so the GPU image is the
+one to build for a complete run:
+
+```bash
+docker build -f artifact/Dockerfile.cuda -t graphmend-cuda .
+docker run -d --gpus all --memory=20g --entrypoint bash graphmend-cuda \
+    -lc "cd /opt/artifact && bash artifact/run_break_analysis.sh"
+```
+
+Add `-v ~/.cache/huggingface:/hf -e HF_HOME=/hf` to keep the six network rows'
+downloads across runs; without it each run re-fetches them.
 
 `--recurse-submodules` matters: without it `jaseci/` is empty and the build
 fails at `COPY jaseci`. Fix an existing clone with `git submodule update
@@ -55,7 +71,7 @@ fails at `COPY jaseci`. Fix an existing clone with `git submodule update
 ```bash
 git clone --recurse-submodules <url> && cd CGO_AE_GraphMend
 bash scripts/setup.sh        # applies the patch, fetches the typeshed stubs
-bash artifact/run_all.sh     # 4 rule suites + 5 models
+bash artifact/run_break_analysis.sh --c1 t5-small   # quick check
 ```
 
 `setup.sh` is idempotent. It also materializes the typeshed stdlib stubs, which
@@ -64,11 +80,11 @@ are gitignored; without them no Jac compilation works at all.
 ### Verification
 
 ```bash
-bash artifact/run_all.sh --suites    # fastest real check, ~1-3 min
+bash artifact/run_break_analysis.sh --c1 t5-small    # one row, a few minutes
 ```
 
-Expect `All checks passed.` and exit status 0. `run_all.sh` prints a
-`PASS`/`FAIL` line per check and exits non-zero if any check fails.
+Expect a single row reading `3` breaks found, `3` eliminated, and an identical
+output. Exit status is 0 only if the row ran and its two arms agreed.
 
 ---
 
@@ -125,51 +141,31 @@ is visible rather than failing them.
 
 ## Claims validation
 
-The paper's contribution is the elimination of graph breaks by source-level
-transformation, with observable behaviour preserved. Each claim below has one
-script. Run from the repository root after `bash scripts/setup.sh`.
+Each claim has one script. Run from the repository root after `bash scripts/setup.sh`.
 
-### Claim 1: each rule collapses a broken region into one FX graph
+### C1: GraphMend automatically repairs fixable FX graph breaks while preserving model behavior
 
-*Paper §4.3.* A region that hands TorchDynamo two or more FX graphs
-untransformed hands it exactly one after the rewrite.
-
-```bash
-bash artifact/run_all.sh --suites
-```
-
-**Expected:** `18 passed`, `0 skipped` — `[Trap]` 6, `[Where]` 3, `[Defer]` 7,
-import-claiming 2. CPU, ~1-3 min.
-
-### Claim 2: graph breaks are eliminated, and the output is unchanged
-
-*Paper §5.1, Table 2, and §5.6.* One script covers the whole claim. Every model
-runs twice, GraphMend off then on, through `jac run` with a `jac.toml`
-differing only in `graphmend_claim_imports` — so what is measured is the
-compiler transforming imported model code, not a hand-edited model file.
+*Paper §5.1, Table 2.* Every model runs twice, GraphMend off then on, through
+`jac run` with a `jac.toml` differing only in `graphmend_claim_imports` — so
+what is measured is the compiler transforming imported model code, not a
+hand-edited model file.
 
 ```bash
-bash artifact/run_break_analysis.sh              # every model
-bash artifact/run_break_analysis.sh --offline    # skip rows needing downloads
-bash artifact/run_break_analysis.sh t5-small     # a subset, for a quick check
+bash artifact/run_break_analysis.sh --c1              # every model
+bash artifact/run_break_analysis.sh --c1 --offline    # skip rows needing downloads
+bash artifact/run_break_analysis.sh --c1 t5-small     # a subset, for a quick check
 ```
 
 **Expected:** a row per model giving breaks found, breaks eliminated, and
-whether the two arms produced a bit-identical output — then
-`torch.compile(fullgraph=True)` failing on every original model and succeeding
-on every transformed one.
+whether the two arms produced a bit-identical output. Rows print as they
+finish. Not every break is fixable: dynamic-shape operators and `tensor.item()`
+calls are out of scope, so some rows are repaired partially or not at all, and
+the claim is about the fixable ones.
 
 Correctness is the load-bearing half. Eliminating a graph break while altering
 the result is not a fix, so a row whose arms disagree **fails the run** rather
 than counting as a successful reduction. A row with no fingerprint to compare
-reports `n/a` and is neither passed nor failed. Exit status is 0 only if every
-row ran, no row changed its output, and full-graph capture flipped on every row.
-
-Full-graph capture is the sub-claim: it is what break elimination buys. vLLM
-and SGLang require `fullgraph=True`, which a single break defeats, so the check
-is asymmetric by construction — a both-pass result is a failure, not a win.
-`backend="eager"` isolates Dynamo's capture from backend compilation, so it is
-deterministic and needs no GPU.
+reports `n/a` and is neither passed nor failed.
 
 To see why a particular break survives, which is what distinguishes a correctly
 unfixed row from a defect:
@@ -178,13 +174,39 @@ unfixed row from a defect:
 python -m paper_eval.run_why longformer-base-4096 on
 ```
 
-### Claim 3: latency and throughput
+### C2: GraphMend enables full-graph capture for models whose graph breaks are completely repaired
 
-*Paper §5.2-5.4, Table 2 and Figure 9.* The speedups follow from eliminating breaks rather than
-standing on their own, and they need the NVIDIA hardware of §5, so they are not
-claims a reviewer must reproduce. We ship no recorded traces or saved results —
-an output file we produced is not something a reviewer can check — so this is a
-script that measures on your own card:
+*Paper §5.6.* This is what C1 buys. vLLM and SGLang require
+`torch.compile(fullgraph=True)`, which a single break defeats, so a model whose
+breaks are gone should capture where it previously could not.
+
+```bash
+bash artifact/run_break_analysis.sh --c2
+```
+
+**Expected:** `fullgraph=True` failing on every original model and succeeding on
+every transformed one. The check is asymmetric by construction — a both-pass
+result is a failure, not a win. Rows that C1 repairs only partially are
+excluded: they still contain breaks, so capture must fail for them and that
+says nothing about this claim. `backend="eager"` isolates Dynamo's capture from
+backend compilation, so it is deterministic and needs no GPU.
+
+Both claims in one pass, which is the default:
+
+```bash
+bash artifact/run_break_analysis.sh
+```
+
+Exit status is 0 only if every row ran, no row changed its output, and
+full-graph capture flipped on every row it was checked for.
+
+### C3: eliminating graph breaks enables downstream cold-start and steady-state gains
+
+*Paper §5.2-5.4, Table 2 and Figure 9.* The speedups follow from eliminating
+breaks rather than standing on their own, and they need the NVIDIA hardware of
+§5. We ship no recorded traces or saved results — an output file we produced is
+not something a reviewer can check — so this is a script that measures on your
+own card:
 
 ```bash
 bash scripts/run_latency.sh        # cold start and steady state; needs a GPU
@@ -210,19 +232,6 @@ so a fixed bound would fail honest runs on different hardware.
 (`--count`, `--json`, `--paper-batch`, `--save-traces`), and
 [`gpu/from_trace.py`](gpu/from_trace.py) reports cold start, steady state and
 launch counts from a trace pair `bench.py --save-traces` wrote.
-
-### Claim 4: GraphMend's own compilation overhead
-
-*Paper §5.7, Figure 10.* Times the same entry program end to end under standard
-Python and under `jac run`, cold (empty compiler cache) and cached.
-
-```bash
-bash scripts/run_compiler_overhead.sh
-```
-
-**Expected:** a mean near 11.5% cold and 1.1% cached. Each cold run gets a
-private `XDG_CACHE_HOME`, so it neither reads nor destroys your own cache. CPU
-only.
 
 ---
 
@@ -345,19 +354,19 @@ CGO_AE_GraphMend/
 │   └── make_archive.sh     #   self-contained tarball for the Zenodo deposit
 ├── paper_eval/             # reproduction harness
 │   ├── registry.py         #   per-model builders and inputs
-│   ├── run_eval.py         #   two-arm runner (Claims 2 and 3)
-│   ├── run_fullgraph.py    #   full-graph capture (Claim 4)
+│   ├── run_eval.py         #   two-arm runner (C1)
+│   ├── run_fullgraph.py    #   full-graph capture (C2)
 │   ├── run_why.py          #   per-break cause reporting
-│   ├── run_overhead.py     #   compiler overhead (Section 5.7)
+│   ├── run_overhead.py     #   compiler overhead (Section 5.7, not a claim)
 │   ├── entry.py            #   the measurement program, run under `jac run`
 │   └── _paths.py           #   where the toolchain and the harness live
 └── artifact/               # this package
     ├── README.md           #   this file
     ├── appendix.tex        #   artifact appendix, for the paper
     ├── Dockerfile.cpu      #   the supported path; pins torch and transformers
-    ├── Dockerfile.cuda     #   GPU image for the latency script
+    ├── Dockerfile.cuda     #   GPU image; needed for C3 and the GPU rows
     ├── run_all.sh          #   PASS/FAIL kick-the-tires runner
-    ├── run_break_analysis.sh    # Claim 2: the whole claim, one entry point
+    ├── run_break_analysis.sh    # C1 and C2; --c1 / --c2 to run one
     ├── verify_break_elimination.py  # the measurement it drives
     ├── jac.toml            #   config for commands typed in this directory
     ├── minimal_example.py  #   smallest correct own-script template
@@ -379,20 +388,11 @@ git submodule update --init && bash scripts/setup.sh
 ```
 
 **A row reads `ERR` and the container exited 137.** SIGKILL from the OOM
-killer. Give Docker at least 12 GB. Measured on aarch64: 9.69 GiB SIGKILLs
-Phi-4, 11.65 GiB passes everything. Note that 8.8 GB, the peak resident size of
-the same row natively on x86-64, is not enough here — the cost is GraphMend
-compiling the imported modeling code, not the weights.
-
-**The rule suites report `skipped`.** torch is not importable by the
-interpreter running the toolchain. `run_all.sh` fails on this rather than
-passing an empty session.
-
-**The rule suites report `N error` with `DeprecationWarning:
-torch.jit.script_method is deprecated`.** Seen on native runs against a torch
-CUDA build: the warning comes from inside torch and the Jac test runner
-escalates it. No rule is involved. The container is the supported path and
-gives `18 passed, 0 skipped`.
+killer. Give Docker at least 20 GB. The heaviest rows are the ones that set
+this floor: `grounding-dino-base` peaks above 11.7 GiB and `chronos-bolt-small`
+was still climbing past 8.8 GiB when starved at a lower cap. The cost is
+GraphMend compiling the imported modeling code, not the weights, so it does not
+shrink with a smaller batch.
 
 **`import jaclang` resolves to a released jaclang.** Every released `jaclang`
 predates GraphMend. Check with:
