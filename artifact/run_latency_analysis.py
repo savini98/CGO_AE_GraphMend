@@ -202,6 +202,21 @@ def apply_row_sources(dest_root, fixed_models, row):
     return written
 
 
+def _modules_cache():
+    """Where transformers keeps Hub remote code, asked of transformers itself.
+
+    It is derived from HF_HOME, XDG_CACHE_HOME or the home directory, in that
+    order, so reconstructing it here gets it wrong wherever the image sets one
+    of them. Returns None if transformers cannot be imported.
+    """
+    probe = subprocess.run(
+        [sys.executable, "-c",
+         "from transformers.dynamic_module_utils import HF_MODULES_CACHE;"
+         "print(HF_MODULES_CACHE)"],
+        capture_output=True, text=True, check=False)
+    return probe.stdout.strip() or None
+
+
 def hub_copy(fixed_models, rows, workdir):
     """A patched copy of the Hub modules cache, or (None, []) if there is none yet.
 
@@ -212,10 +227,8 @@ def hub_copy(fixed_models, rows, workdir):
     fixed tree is built; this is called again before each fixed arm, by which
     point the original arm has populated it.
     """
-    _hf_home = os.environ.get("HF_HOME") or os.path.expanduser("~/.cache/huggingface")
-    mod_cache = (os.environ.get("HF_MODULES_CACHE")
-                 or os.path.join(_hf_home, "modules"))
-    if not os.path.isdir(mod_cache):
+    mod_cache = _modules_cache()
+    if not mod_cache or not os.path.isdir(mod_cache):
         return None, []
     mod_copy = os.path.join(workdir, "hf_modules")
     if os.path.isdir(mod_copy):
@@ -424,8 +437,14 @@ def main():
                 # tree was built, so the copy found nothing and the fixed arm
                 # ran the stock code in both arms. The original arm above has
                 # populated it by now, so build it here instead.
-                if hfmod is None:
-                    hfmod, _hub = hub_copy(o.fixed_models, rows, work)
+                # Re-copy every time rather than only when the cache was
+                # missing: the modules cache is created by the first download,
+                # so on a machine that has never run these models it is absent
+                # when the fixed tree is built and appears only once the
+                # original arm above has run.
+                _hfmod, _hub = hub_copy(o.fixed_models, [key], work)
+                if _hfmod:
+                    hfmod = _hfmod
                     for _srcdir, _base in _hub:
                         print(f"    {_srcdir}/{_base}", flush=True)
                 on = run_arm(bench, sys.executable, key, True, tdir, fixed_path,
