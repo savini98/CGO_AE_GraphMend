@@ -168,7 +168,7 @@ def _bs(default_b, default_s):
             int(os.environ.get("GM_BENCH10_SEQ", default_s)))
 
 
-def _auto_batch(model, inputs, torch, target=0.70):
+def _auto_batch(model, inputs, torch, key, target=0.70):
     """Port of find_max_batch_size() from the reference repo's gpu_utils.py.
 
     Probes one forward pass at the built-in batch, converts that into a
@@ -207,6 +207,30 @@ def _auto_batch(model, inputs, torch, target=0.70):
         print(f"# auto-batch: model {model_gb:.2f} GB, per-sample "
               f"{per_sample / 1024:.1f} KB, multiplier {mult:.0f}x, "
               f"target {target:.0%} of {total / 1024 ** 3:.1f} GB -> batch {bs}")
+        # Verify rather than trust. The estimate comes from a probe at a small
+        # batch, and activation growth is not linear in it, so the number can be
+        # too large and the run then dies at allocation time. Halve until a real
+        # forward at that batch survives, which is what the reference does
+        # before it reports "Verified: batch_size=N fits".
+        while bs > 1:
+            try:
+                os.environ["GM_BENCH10_BATCH"] = str(bs)
+                probe_model, probe_inputs = build(key, "cuda")
+                with torch.inference_mode():
+                    probe_model(**probe_inputs)
+                    torch.cuda.synchronize()
+                peak = torch.cuda.max_memory_allocated(0) / (1024 ** 3)
+                del probe_model, probe_inputs
+                torch.cuda.empty_cache()
+                gc.collect()
+                print(f"# auto-batch: verified {bs} fits (peak {peak:.2f} GB)")
+                break
+            except torch.cuda.OutOfMemoryError:
+                torch.cuda.empty_cache()
+                gc.collect()
+                bs = max(1, bs // 2)
+                print(f"# auto-batch: did not fit, retrying at {bs}")
+        os.environ.pop("GM_BENCH10_BATCH", None)
         return bs
     except Exception as exc:                      # noqa: BLE001
         print(f"# auto-batch failed ({type(exc).__name__}), keeping default")
@@ -596,7 +620,7 @@ def arm():
     # point: the rule is what transfers across GPUs, the number is not.
     if (dev == "cuda" and os.environ.get("GM_BENCH10_AUTO_BATCH")
             and not os.environ.get("GM_BENCH10_BATCH")):
-        bs = _auto_batch(model, inputs, torch)
+        bs = _auto_batch(model, inputs, torch, key)
         if bs and bs > 1:
             os.environ["GM_BENCH10_BATCH"] = str(bs)
             del model, inputs

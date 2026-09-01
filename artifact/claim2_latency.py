@@ -130,6 +130,17 @@ QUICK_ROWS = [
     "Phi-4-mini-instruct",
 ]
 
+# Sequence length per row, from each reference script's fixed_batch signature.
+# See the note above: the batch is only half the workload.
+PAPER_SEQ = {
+    "t5-small": 5, "t5-base": 5, "t5-3b": 5, "flan-t5-large": 5,
+    "inclusively-reformulation-it5": 5, "bart-base": 5, "bart-large-cnn": 5,
+    "rebel-large": 5, "opus-mt-fr-en": 5, "biogpt": 5,
+    "blenderbot-400M-distill": 5, "tiny-random-PegasusForCausalLM": 5,
+    "longformer-scico": 5, "Qwen-Audio-Chat": 5, "Phi-4-mini-instruct": 5,
+    "chronos-bolt-small": 128,
+}
+
 PAPER_BATCH = {
     "t5-small": 1345,
     "bart-base": 811,
@@ -137,6 +148,20 @@ PAPER_BATCH = {
     "rebel-large": 180,
     "opus-mt-fr-en": 1089,
     "MoLFormer-XL-both10pct": 837,
+    # The rest, read from run_all_3090_new.log. Where the two arms auto-detected
+    # differently (opus 1089/1270, it5 105/188, t5-base 350/407) the original
+    # arm's value is used: both arms must run one batch or the ratio compares
+    # unequal work.
+    "t5-base": 350,
+    "t5-3b": 20,
+    "inclusively-reformulation-it5": 105,
+    "whisper-base": 75,
+    "whisper-small": 9,
+    "whisper-large-v3": 1,
+    "layoutlmv3-base": 31,
+    "grounding-dino-tiny": 1,
+    "grounding-dino-base": 1,
+    "Florence-2": 1,
 }
 
 COLD_TOL = float(os.environ.get("GM_COLD_TOL", "0.35"))
@@ -295,8 +320,24 @@ def run_arm(bench, python, key, on, trace_dir, extra_path, runs, hf_modules=None
     # else resident. The trade-off is direction, not validity: a small batch
     # leaves the fixed compile cost unamortised, so cold start reads HIGH, while
     # the paper's larger batches read lower. Table 2 sits between the two.
+    # The sequence is fixed by the reference scripts (seq_len=5 for the text
+    # rows) and only the BATCH is auto-sized. Applying it in both modes is what
+    # makes auto-sizing follow the paper's protocol rather than half of it:
+    # auto-batch at our seq 128 gives t5-small 16.61x, the same as the default,
+    # while the paper's 1345x5 gives 10.32x.
+    if key in PAPER_SEQ and not os.environ.get("GM_BENCH10_SEQ"):
+        env["GM_BENCH10_SEQ"] = str(PAPER_SEQ[key])
+    if not os.environ.get("GM_PAPER_BATCH") and not os.environ.get(
+            "GM_BENCH10_BATCH"):
+        # Fill ~70% of VRAM, the paper's rule, which transfers across GPUs where
+        # its recorded numbers do not.
+        env["GM_BENCH10_AUTO_BATCH"] = "1"
     if os.environ.get("GM_PAPER_BATCH") and key in PAPER_BATCH:
         env["GM_BENCH10_BATCH"] = str(PAPER_BATCH[key])
+        # The sequence has to move with the batch, or the row runs a workload
+        # the paper never measured.
+        if key in PAPER_SEQ:
+            env["GM_BENCH10_SEQ"] = str(PAPER_SEQ[key])
     # A PRIVATE Inductor cache per arm. Sharing one lets the second arm reuse
     # kernels the first compiled and inflates the cold ratio several-fold.
     icache = os.path.join(trace_dir, "inductor_" + ("on" if on else "off"))
@@ -368,6 +409,12 @@ def main():
             try:
                 off = run_arm(bench, sys.executable, key, False, tdir, None,
                               o.runs)
+                # Pin the fixed arm to whatever the original arm sized to. The
+                # fixed model uses less memory, so left to itself it would pick
+                # a LARGER batch and the ratio would span unequal work. The
+                # reference runs have exactly that flaw on two rows.
+                if off.get("auto_batch"):
+                    os.environ["GM_BENCH10_BATCH"] = str(off["auto_batch"])
                 # The shared tree may hold another row's copy of a same-named
                 # module by now, so re-assert this row's own sources first.
                 apply_row_sources(fixed_path, o.fixed_models, key)
