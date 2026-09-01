@@ -1,45 +1,17 @@
 #!/usr/bin/env python3
-"""C3: eliminating graph breaks lets PyTorch realize downstream speedups.
+"""C3: the effect of removing graph breaks on cold-start and steady-state latency.
 
-    python artifact/run_latency_analysis.py            # stage 1, the 10-row sample
-    python artifact/run_latency_analysis.py --full     # stage 2, every row
-    python artifact/run_latency_analysis.py t5-small   # one row
-    python artifact/run_latency_analysis.py --list     # what would run, and why not
+    python artifact/run_latency_analysis.py            # the 10-model sample
+    python artifact/run_latency_analysis.py --full     # every model
+    python artifact/run_latency_analysis.py t5-small   # one model
+    python artifact/run_latency_analysis.py --list     # what would run
 
-TWO STAGES. Stage 1 is a 10-row sample chosen for coverage, not speed: every
-rule fires at least once ([Trap] on MoLFormer and grounding-dino-base, [Where]
-on Phi-4-mini and Qwen-Audio-Chat, [Defer] on the rest), every input modality
-appears (text, speech, vision, time series), and both ends of the agreement
-range are present. Stage 2 is every row and costs about four times as long. A
-reviewer who wants the claim without the wait runs stage 1; it is the same
-measurement over fewer models.
+Neither arm runs the compiler. The original arm is stock transformers; the
+fixed arm is the same tree with the modules GraphMend transformed replaced by
+its output, from artifact/fixed_models/. Regenerate those with
+artifact/gen_fixed_models.py and gate them with artifact/verify_fixed.py.
 
-C1 (`run_break_analysis.sh --c1`) proves GraphMend eliminates the breaks and
-preserves output. It has to run the compiler, because the compiler is the
-contribution. THIS script measures what that transformation buys, and it does
-NOT run the compiler: both arms are plain CPython importing plain Python.
-
-    original arm   stock transformers
-    fixed arm      the same tree with GraphMend's OUTPUT copied over the
-                   modules it transformed, from artifact/fixed_models/
-
-That is the paper's own methodology -- the reference scripts compare stock
-transformers against fixed model files and never recompile during a timed run --
-and it is why those runs land on Table 2 where compiling inside the measured
-window does not: the front end's minutes stop falling inside the profiled region.
-It also makes each arm seconds rather than minutes, which is the difference
-between a reviewer running one row and running all of them.
-
-PROVENANCE. The fixed sources are compiler output, not hand edits, and that is
-checkable rather than asserted: artifact/gen_fixed_models.py regenerates them,
-and every file ships beside its `.original.py`. Regenerate and diff if you do
-not want to take it on trust. They are generated against the pinned
-transformers and track that version rather than any installed one.
-
-WHAT TO EXPECT. Cold start in the single to low double digits, and inversely
-related to batch size: the same model reads 3.49x at batch 1345 and 15.66x at
-8x128. Steady state within a few percent of 1.0x. Not compared to Table 2 row by
-row, since the paper's figures hold at its own batch sizes.
+Needs a CUDA device, and downloads pretrained weights for every model.
 """
 import argparse
 import glob
@@ -108,10 +80,8 @@ SOURCES = {
     "Qwen-Audio-Chat": ["Qwen-Audio-Chat"],
 }
 
-# The paper's per-model batch, read from run_all_3090_new.log in the research
-# repository. Cold start is strongly batch-sensitive -- the same model reads
-# 3.49x at batch 1345 and 15.66x at 8x128 -- so a magnitude is only comparable
-# to Table 2 when the batch is.
+# The paper's per-model batch. Cold start is batch-sensitive, so a magnitude
+# is only comparable to the paper's when the batch is.
 #
 # ONE VALUE PER MODEL, USED FOR BOTH ARMS. The reference auto-detects batch from
 # free GPU memory, and the fixed model needs less of it, so five rows were
@@ -158,7 +128,7 @@ PAPER_BATCH = {
     "rebel-large": 180,
     "opus-mt-fr-en": 1089,
     "MoLFormer-XL-both10pct": 837,
-    # The rest, read from run_all_3090_new.log. Where the two arms auto-detected
+    # The rest. Where the two arms auto-detected
     # differently (opus 1089/1270, it5 105/188, t5-base 350/407) the original
     # arm's value is used: both arms must run one batch or the ratio compares
     # unequal work.
@@ -319,7 +289,7 @@ def run_arm(bench, python, key, on, trace_dir, extra_path, runs, hf_modules=None
     if hf_modules:
         env["HF_MODULES_CACHE"] = hf_modules
     env["GM_MODEL"] = key
-    # Same batch for BOTH arms, from the paper's own log. The reference
+    # Same batch for BOTH arms. The reference
     # auto-detects it from free GPU memory, and the fixed model needs less, so
     # five rows there were measured with the arms on different batches; a ratio
     # across unequal batches compares unequal work.
@@ -333,7 +303,7 @@ def run_arm(bench, python, key, on, trace_dir, extra_path, runs, hf_modules=None
     # The sequence is fixed by the reference scripts (seq_len=5 for the text
     # rows) and only the BATCH is auto-sized. Applying it in both modes is what
     # makes auto-sizing follow the paper's protocol rather than half of it:
-    # auto-batch at our seq 128 gives t5-small 16.61x, the same as the default,
+    # auto-batch at our seq 128 agrees with the default,
     # while the paper's 1345x5 gives 10.32x.
     if key in PAPER_SEQ and not os.environ.get("GM_BENCH10_SEQ"):
         env["GM_BENCH10_SEQ"] = str(PAPER_SEQ[key])
@@ -484,8 +454,9 @@ def main():
         # Report the row as it lands. The table below is only printed once every
         # row is done, and a ten-row run is long enough that a reviewer watching
         # it should not have to wait for the first number.
+        batch = off.get("auto_batch") or off.get("in_shape")
         print(f"ROW {key:28s} cold {cold:6.2f}x  steady {warm:6.3f}x  "
-              f"launches {lo} -> {ln}", flush=True)
+              f"launches {lo} -> {ln}  batch {batch}", flush=True)
 
     print()
     print(f"{'model':32s} {'cold':>10s} {'steady state':>14s}")

@@ -2,7 +2,7 @@
 
 This reproduces the authors' own measurement, not a re-invention of it. The
 definitions come from `models/profiling_utils.py` and `cold_start_no_compile.py`
-in the GraphMend research repository, and the two matter because a naive
+in the reference scripts, and the two matter because a naive
 wall-clock timer measures a different quantity and lands near 1x by
 construction.
 
@@ -44,7 +44,7 @@ the entry program has to be Jac-compiled or every [Defer] rewrite stays inert
 cache, or the second arm skips codegen and its "cold" run is not cold.
 
 Compilation is `torch.compile(m, backend="inductor", mode="reduce-overhead",
-fullgraph=False)`, matching the model scripts in the research repository.
+fullgraph=False)`, matching the reference model scripts.
 
     PYTHONPATH=$PWD python ../artifact/gpu/bench.py t5-small
     PYTHONPATH=$PWD python ../artifact/gpu/bench.py --count t5-small
@@ -65,8 +65,8 @@ def _stamp_now():
 
 ARM = "GM_BENCH10_ARM"
 
-# Per-model batch sizes the paper uses on an RTX 3090, from run_all_3090_new.log
-# in the authors' research repository. The paper sizes each model to about 70%
+# Per-model batch sizes the paper uses on an RTX 3090. It sizes each model to
+# about 70%
 # of GPU memory and runs the original and fixed variants at the same batch, so a
 # comparison at any other batch is measuring a different point. --paper-batch
 # selects these; without it the small defaults in build() apply, which are fine
@@ -169,7 +169,7 @@ def _bs(default_b, default_s):
 
 
 def _auto_batch(model, inputs, torch, key, target=0.70):
-    """Port of find_max_batch_size() from the reference repo's gpu_utils.py.
+    """Size the batch to a target fraction of GPU memory.
 
     Probes one forward pass at the built-in batch, converts that into a
     per-sample memory cost, inflates it by the same size-tiered generation
@@ -628,7 +628,7 @@ def arm():
 
     # Paper batch sizing: "Batch sizes target about 70% of GPU memory per
     # model; original and fixed models use identical batch sizes and inputs."
-    # This is a port of find_max_batch_size() from the reference repo's
+    # This mirrors the reference batch sizing in
     # gpu_utils.py, so the batch is chosen by the paper's RULE rather than
     # copied from the paper's MACHINE. On a 24 GB card that yields a smaller
     # batch than the 80 GB host the reference traces came from, which is the
@@ -648,7 +648,7 @@ def arm():
             torch.cuda.synchronize()
 
     # One eager forward before anything is compiled, matching the "quick eager
-    # sanity check (no compile)" the research repo's per-model scripts run
+    # sanity check (no compile)" the reference per-model scripts run
     # before profiling. This is not a formality: lazily-populated module caches
     # get filled here, OUTSIDE any captured region. Phi-4's rotary embedding
     # fills `self.long_inv_freq` on first use, and without this warm-up that
@@ -721,7 +721,7 @@ def arm():
         # program. The signature of that failure is identical CUDA-graph launch
         # counts between the two arms, which is what this benchmark reports.
         # `dynamic` is left at its default, matching the compile_model() in the
-        # research repo's per-model scripts exactly. Passing dynamic=False
+        # reference per-model scripts exactly. Passing dynamic=False
         # specialises on shape and makes a model that mutates module state in
         # forward recompile after iteration 1, which shows up as region "0/1"
         # taking over from "0/0" and leaves the cold window undefined.

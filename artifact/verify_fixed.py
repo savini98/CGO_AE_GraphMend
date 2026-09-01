@@ -4,10 +4,8 @@
     python artifact/verify_fixed.py                # every row with fixed sources
     python artifact/verify_fixed.py bart-base      # one row
 
-Latency is only worth measuring once this passes. A fixed source that leaves
-breaks behind still produces a tidy speedup number, and that number means
-nothing -- the earlier BART rows measured 0.8x precisely because their launches
-went 30 -> 4 instead of 30 -> 1, so the arms were not comparable.
+Latency is only worth measuring once this passes: a fixed source that leaves
+breaks behind still produces a speedup number, and that number means nothing.
 
 WHAT IT CHECKS, per row:
 
