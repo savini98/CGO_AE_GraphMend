@@ -32,7 +32,9 @@ docker run --rm graphmend c1 t5-small
 
 A successful run exits with status 0.
 
-> Docker should have at least **20 GB RAM** and **35 GB disk**.
+> Docker should have at least **20 GB RAM** and **100 GB disk** (60 GB is
+> the floor). The image is 7.3 GB, one build leaves about 7 GB of build
+> cache, and the model weights are roughly 15 GB across the three claims.
 
 If the repository was cloned without submodules:
 
@@ -103,7 +105,7 @@ For C1 and C2:
 
 - Docker
 - 20 GB RAM
-- 35 GB disk
+- 100 GB disk (60 GB minimum)
 
 For C3:
 

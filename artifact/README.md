@@ -159,7 +159,10 @@ python artifact/verify_fixed.py        # check they remove the same breaks
   code, and that is what sets the floor, not the weights. Below it the
   container is killed and the row reports `ERR` with exit 137. Check with
   `docker info | grep "Total Memory"`
-- 35 GB of disk, for the image, the toolchain cache and the model weights
+- **100 GB of disk** (60 GB is the floor). The image is 7.3 GB, one build
+  leaves about 7 GB of build cache, and the model weights come to roughly
+  15 GB: C1 and C2 build most rows from small configs, but C3 downloads full
+  pretrained checkpoints for every row it times
 - No GPU for C1 and C2. C3 needs an NVIDIA card
 - Six of the 27 rows download weights or Hub code. `--offline` skips them. Add
   `-v ~/.cache/huggingface:/hf -e HF_HOME=/hf` to keep the downloads between
