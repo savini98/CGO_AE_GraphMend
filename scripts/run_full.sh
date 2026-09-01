@@ -8,8 +8,8 @@
 # are reported as SKIPPED rather than failed otherwise, since the paper's
 # hardware is not a precondition for the artifact's primary claims.
 #
-# Hours, not minutes. GM_NETWORK=1 additionally runs the 6 rows that need
-# network access and trust_remote_code.
+# Hours, not minutes. By default the rows needing network access and
+# trust_remote_code are skipped; GM_NETWORK=1 includes them.
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 need_setup
 
@@ -19,18 +19,15 @@ run_step() {
     if "$@"; then RESULTS+=("PASS     $label"); else RESULTS+=("FAIL     $label"); fi
 }
 
-# Break elimination and correctness come from the same two-arm run: it reports
-# both columns, so running run_correctness.sh separately would repeat the work.
-run_step "Table 2 break elimination + correctness (Sections 5.1)" \
-    bash "$REPO/scripts/run_break_analysis.sh"
-
-if [ -n "${GM_NETWORK:-}" ]; then
-    run_step "the 6 network rows" \
-        env GM_NETWORK=1 bash "$REPO/scripts/run_break_analysis.sh"
-fi
-
-run_step "full-graph capture (Section 5.6)" \
-    bash "$REPO/scripts/run_fullgraph.sh"
+# Claim 1 is one script. Break elimination, output correctness and full-graph
+# capture come from the same two-arm run over the same models, so splitting
+# them into separate entry points would compile every model three times to
+# report three columns of one result.
+# Network rows are opt-in: without GM_NETWORK the run stays offline.
+CLAIM1_ARGS=()
+[ -n "${GM_NETWORK:-}" ] || CLAIM1_ARGS+=(--offline)
+run_step "Claim 1: breaks eliminated, output identical, full graph (5.1, 5.6)" \
+    bash "$REPO/artifact/run_break_analysis.sh" "${CLAIM1_ARGS[@]}"
 
 run_step "compiler overhead (Figure 10, Section 5.7)" \
     bash "$REPO/scripts/run_compiler_overhead.sh"

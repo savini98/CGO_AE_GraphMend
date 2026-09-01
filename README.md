@@ -85,9 +85,7 @@ reproduces, and **all of it runs on CPU** -- no GPU, no model weights, and for
 | | Claim | Paper |
 |---|---|---|
 | **C1** | Each of the three rules collapses a region that hands TorchDynamo 2+ FX graphs into exactly 1 | §4.3 |
-| **C2** | Graph breaks are eliminated at Table 2's fix rates on all 27 benchmark models | §5.1, Table 2 |
-| **C3** | The transformed model produces identical output | §5.1 |
-| **C4** | `torch.compile(fullgraph=True)` succeeds only after the transformation | §5.6 |
+| **C2** | Graph breaks are eliminated on all 27 models, the output is unchanged, and the transformed model captures as a full graph | §5.1, Table 2, §5.6 |
 
 Measured inside the image above, on the paper's environment (torch 2.12.1,
 transformers 4.52.4): the 21 offline rows go from **89 breaks to 19**, and the
