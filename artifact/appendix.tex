@@ -193,12 +193,13 @@ Rows run by name (\texttt{run\_break\_analysis.sh t5-small biogpt}), and
 \texttt{GM\_GPU\_MODELS} selects a subset for the GPU scripts. Rules are ablated
 with \texttt{graphmend\_disable}, taking any of \texttt{trap}, \texttt{where},
 \texttt{defer}. To target a model outside the suite, add a \texttt{\_build()}
-returning \texttt{(model, inputs)} and a registry entry naming the modules to
-transform, then inspect the detected breaks with
-\texttt{python -m paper\_eval.run\_why <model> on}, which prints each surviving
-break with its cause and source location. Note that a model's breaks often live
-in shared \texttt{transformers} modules rather than its own package, so a scope
-naming only the model package will miss them.
+returning \texttt{(model, inputs)} and a registry entry, then inspect the
+detected breaks with \texttt{python -m paper\_eval.run\_why <model> on}, which
+prints each surviving break with its cause and source location. What a model
+imports matters: GraphMend claims imported code bounded by top-level package,
+so a model whose code lives in a package with a large transitive import surface
+is far more expensive to transform than one inside
+\texttt{transformers.models.*}.
 
 \subsection{Notes}
 

@@ -1,5 +1,5 @@
 """Registry of paper-evaluated models: how to build a small instance + inputs,
-and which transformers submodule GraphMend should scope-transform.
+for each benchmark row.
 
 Small configs (no weight download) are used so break-counting is fast; graph
 breaks are structural (code paths), not weight-dependent. torch.manual_seed is
@@ -363,55 +363,47 @@ def _qwen_audio():
 
 
 MODELS = {
-    "t5-small":       {"build": _t5,         "scope": ["transformers.models.t5"]},
-    "clap-htsat-fused": {"build": _clap, "scope": ["transformers.models.clap"]},
-    "stella-en-400M-v5": {"build": _stella, "scope": ["transformers_modules"]},
-    "moe-minicpm-x4-base": {"build": _moe_minicpm, "scope": ["transformers_modules"]},
+    "t5-small":       {"build": _t5},
+    "clap-htsat-fused": {"build": _clap},
+    "stella-en-400M-v5": {"build": _stella},
+    "moe-minicpm-x4-base": {"build": _moe_minicpm},
     # Reads 2 -> 0, 100%, matching Table 2's DC (2). Both breaks are the DC pair
     # at the audio-fusion guard (modeling_qwen.py:760). This is the
     # precondition-conjunct form of [Where]: the true branch dereferences
     # `audio_info` unconditionally, so the rule leads the guard with
     # `audio_info is not None` rather than selecting between a tensor and None.
-    "Qwen-Audio-Chat": {"build": _qwen_audio, "scope": ["transformers_modules"]},
+    "Qwen-Audio-Chat": {"build": _qwen_audio},
     # Same modeling code as t5-base / t5-3b / flan-t5-large /
     # inclusively-reformulation-it5 / chronos-bolt-small, which is why one t5
     # entry stands in for those Table 2 rows.
-    "whisper":        {"build": _whisper,    "scope": ["transformers.models.whisper"]},
-    "bart":           {"build": _bart,       "scope": ["transformers.models.bart"]},
+    "whisper":        {"build": _whisper},
+    "bart":           {"build": _bart},
     # Its breaks are not in the model package at all: they are `warnings.warn`
-    # calls in the SHARED transformers.modeling_utils, so the scope must name
+    # calls in the SHARED transformers.modeling_utils,
     # that module too (same lesson as Phi-4 and modeling_rope_utils).
-    "layoutlmv3-base": {"build": _layoutlmv3,
-                        "scope": ["transformers.models.layoutlmv3",
-                                  "transformers.modeling_utils"]},
-    "longformer-base-4096": {"build": _longformer,
-                             "scope": ["transformers.models.longformer"]},
-    "grounding-dino": {"build": _grounding_dino,
-                       "scope": ["transformers.models.grounding_dino"]},
+    "layoutlmv3-base": {"build": _layoutlmv3},
+    "longformer-base-4096": {"build": _longformer},
+    "grounding-dino": {"build": _grounding_dino},
     # Its own package holds the model class, but the breaks are logger calls in
     # transformers' T5 that it builds on, so both have to be in scope.
-    "chronos-bolt-small": {"build": _chronos_bolt,
-                           "scope": ["chronos", "transformers.models.t5"]},
+    "chronos-bolt-small": {"build": _chronos_bolt},
     # No "call": "generate" -- see _florence2: that path is not compiled at all.
-    "Florence-2": {"build": _florence2, "scope": ["transformers_modules"]},
-    "biogpt":         {"build": _biogpt,     "scope": ["transformers.models.biogpt"]},
-    "blenderbot-400M-distill": {"build": _blenderbot, "scope": ["transformers.models.blenderbot"]},
-    "opus-mt-fr-en":  {"build": _marian,        "scope": ["transformers.models.marian"]},
-    "PegasusForCausalLM": {"build": _pegasus_causal, "scope": ["transformers.models.pegasus"]},
+    "Florence-2": {"build": _florence2},
+    "biogpt":         {"build": _biogpt},
+    "blenderbot-400M-distill": {"build": _blenderbot},
+    "opus-mt-fr-en":  {"build": _marian},
+    "PegasusForCausalLM": {"build": _pegasus_causal},
     # Phi-4-mini exercises [Where]. Its break site is `longrope_frequency_update`
     # in the SHARED top-level `transformers.modeling_rope_utils`, not under
     # `transformers.models.phi3` -- scoping only the model package silently
     # misses it and the model appears to be fixed by [Defer] alone.
-    "Phi-4-mini-instruct": {"build": _phi3_longrope,
-                            "scope": ["transformers.models.phi3",
-                                      "transformers.modeling_rope_utils"]},
+    "Phi-4-mini-instruct": {"build": _phi3_longrope},
     # [Trap]. Opt-in: needs network + trust_remote_code, so it is excluded from
     # the default run (see NETWORK_MODELS). Hub remote code lands under the
     # `transformers_modules.*` namespace; scoping it works because jaclang hooks
     # the source loader as well as sys.meta_path (transformers builds the spec
     # directly, so a meta-path finder alone never sees these modules).
-    "MoLFormer-XL-both10pct": {"build": _molformer,
-                               "scope": ["transformers_modules"]},
+    "MoLFormer-XL-both10pct": {"build": _molformer},
 }
 
 # Models the default `python -m paper_eval.run_eval` skips: they download code or
