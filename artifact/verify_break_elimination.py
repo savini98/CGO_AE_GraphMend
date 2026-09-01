@@ -14,13 +14,6 @@ Correctness is three-state: `identical`, `CHANGED` (which fails the run), or
 Both arms go through `jac run` with a jac.toml differing only in
 `graphmend_claim_imports`, so what is measured is the compiler transforming
 imported model code rather than a hand-edited model file.
-
-Most rows are measured by the small-config harness in paper_eval/. Five are
-sensitive to how the model is built and what it is fed, and use the
-reference-fidelity build in gpu/bench.py instead: the BART family, whose guard
-is gated on `dtype == torch.float16` and so has no data-dependent breaks in
-fp32, and grounding-dino, which needs its real config and a processor-built
-batch. Neither needs a GPU.
 """
 import argparse
 import json
@@ -43,9 +36,8 @@ MODELS = (
     "moe-minicpm-x4-base", "stella-en-400M-v5",
 )
 
-# Rows the small-config harness does not build the way the reference does,
-# routed to gpu/bench.py. The value is the key bench.py knows them by. NONE OF
-# THESE NEED A GPU: what changes their count is dtype and batch, not device.
+# Rows built through gpu/bench.py, which selects the dtype and batch these
+# models need. The value is the key bench.py knows them by. No GPU required.
 REF_BUILD = {
     "bart": "bart-large-cnn", "bart-base": "bart-base",
     "rebel-large": "rebel-large", "opus-mt-fr-en": "opus-mt-fr-en",
@@ -191,8 +183,7 @@ def main():
     ref_keys = [k for k in REF_BUILD if k not in skip]
     small_keys = [k for k in MODELS if k not in skip and k not in REF_BUILD]
 
-    print(f"routing {len(small_keys)} row(s) to the small-config harness and "
-          f"{len(ref_keys)} to the reference-fidelity build")
+    print(f"measuring {len(small_keys) + len(ref_keys)} model(s)")
     print("this takes a while: every row compiles the model twice\n")
 
     got = {}
