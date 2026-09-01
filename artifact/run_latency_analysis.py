@@ -481,6 +481,11 @@ def main():
             continue
         spread = ((max(colds) - min(colds)) / cold * 100) if len(colds) > 1 else 0.0
         results.append((key, cold, warm, lo, ln, spread, len(colds)))
+        # Report the row as it lands. The table below is only printed once every
+        # row is done, and a ten-row run is long enough that a reviewer watching
+        # it should not have to wait for the first number.
+        print(f"ROW {key:28s} cold {cold:6.2f}x  steady {warm:6.3f}x  "
+              f"launches {lo} -> {ln}", flush=True)
 
     print()
     print(f"{'model':32s} {'cold':>10s} {'steady state':>14s}")
