@@ -202,6 +202,39 @@ def apply_row_sources(dest_root, fixed_models, row):
     return written
 
 
+def hub_copy(fixed_models, rows, workdir):
+    """A patched copy of the Hub modules cache, or (None, []) if there is none yet.
+
+    Rows loaded with trust_remote_code keep their model code in the modules
+    cache rather than in the transformers package, so their fixed sources have
+    to be written there instead. The cache is created by the first download, so
+    on a machine that has never run these models it does not exist when the
+    fixed tree is built; this is called again before each fixed arm, by which
+    point the original arm has populated it.
+    """
+    _hf_home = os.environ.get("HF_HOME") or os.path.expanduser("~/.cache/huggingface")
+    mod_cache = (os.environ.get("HF_MODULES_CACHE")
+                 or os.path.join(_hf_home, "modules"))
+    if not os.path.isdir(mod_cache):
+        return None, []
+    mod_copy = os.path.join(workdir, "hf_modules")
+    if os.path.isdir(mod_copy):
+        shutil.rmtree(mod_copy, ignore_errors=True)
+    shutil.copytree(mod_cache, mod_copy, symlinks=True,
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    applied = []
+    for row in rows:
+        for srcdir in SOURCES.get(row, []):
+            d = os.path.join(fixed_models, srcdir)
+            for fixed in sorted(glob.glob(os.path.join(d, "modeling_*.graphmend.py"))):
+                base = os.path.basename(fixed)[: -len(".graphmend.py")]
+                for hit in glob.glob(os.path.join(mod_copy, "**", base + ".py"),
+                                     recursive=True):
+                    shutil.copyfile(fixed, hit)
+                    applied.append((srcdir, base + " (hub)"))
+    return mod_copy, applied
+
+
 def build_fixed_tree(fixed_models, rows, workdir, python):
     """A transformers tree with GraphMend's output copied over the originals.
 
@@ -248,25 +281,8 @@ def build_fixed_tree(fixed_models, rows, workdir, python):
     # copy silently finds nothing, the Hub rows keep their unpatched code, and
     # MoLFormer fails the launch gate at 50 -> 50 as if the transform had done
     # nothing. Florence-2 and Qwen-Audio-Chat load the same way.
-    _hf_home = os.environ.get("HF_HOME") or os.path.expanduser("~/.cache/huggingface")
-    mod_cache = (os.environ.get("HF_MODULES_CACHE")
-                 or os.path.join(_hf_home, "modules"))
-    mod_copy = os.path.join(workdir, "hf_modules")
-    if os.path.isdir(mod_cache):
-        if not os.path.isdir(mod_copy):
-            shutil.copytree(mod_cache, mod_copy, symlinks=True,
-                            ignore=shutil.ignore_patterns("__pycache__"))
-        for row in rows:
-            for srcdir in SOURCES.get(row, []):
-                d = os.path.join(fixed_models, srcdir)
-                for fixed in sorted(glob.glob(os.path.join(d, "modeling_*.graphmend.py"))):
-                    base = os.path.basename(fixed)[: -len(".graphmend.py")]
-                    for hit in glob.glob(os.path.join(mod_copy, "**", base + ".py"),
-                                         recursive=True):
-                        shutil.copyfile(fixed, hit)
-                        applied.append((srcdir, base + " (hub)"))
-    else:
-        mod_copy = None
+    mod_copy, hub_applied = hub_copy(fixed_models, rows, workdir)
+    applied.extend(hub_applied)
 
     fh = open(os.path.join(dest_root, "sitecustomize.py"), "w", encoding="utf-8")
     fh.write(SHIM)
@@ -402,6 +418,16 @@ def main():
                 # The shared tree may hold another row's copy of a same-named
                 # module by now, so re-assert this row's own sources first.
                 apply_row_sources(fixed_path, o.fixed_models, key)
+                # Hub rows keep their model code in the modules cache, which
+                # does not exist until something downloads it. On a machine
+                # that has never run these models it was absent when the fixed
+                # tree was built, so the copy found nothing and the fixed arm
+                # ran the stock code in both arms. The original arm above has
+                # populated it by now, so build it here instead.
+                if hfmod is None:
+                    hfmod, _hub = hub_copy(o.fixed_models, rows, work)
+                    for _srcdir, _base in _hub:
+                        print(f"    {_srcdir}/{_base}", flush=True)
                 on = run_arm(bench, sys.executable, key, True, tdir, fixed_path,
                              o.runs, hfmod)
             except RuntimeError as exc:
