@@ -45,6 +45,11 @@ REF_BUILD = {
     "grounding-dino-base": "grounding-dino-base",
 }
 
+# Rows far heavier than the rest. They are measured LAST so that a row which
+# exhausts memory, or has to be given up on, cannot block the rows behind it:
+# everything else already has a result by the time these start.
+RUN_LAST = ("chronos-bolt-small",)
+
 # Rows that download weights or Hub remote code.
 NETWORK_ROWS = {"MoLFormer-XL-both10pct", "Florence-2", "Qwen-Audio-Chat",
                 "chronos-bolt-small", "moe-minicpm-x4-base",
@@ -182,6 +187,9 @@ def main():
 
     ref_keys = [k for k in REF_BUILD if k not in skip]
     small_keys = [k for k in MODELS if k not in skip and k not in REF_BUILD]
+    # Stable, so the heavy rows move to the end and everything else keeps its
+    # order.
+    small_keys.sort(key=lambda k: k in RUN_LAST)
 
     print(f"measuring {len(small_keys) + len(ref_keys)} model(s)")
     print("this takes a while: every row compiles the model twice\n")

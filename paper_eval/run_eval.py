@@ -119,9 +119,16 @@ def _run(key: str, mode: str, state: str = "") -> dict:
         shutil.rmtree(workdir, ignore_errors=True)
 
 
+# Rows far heavier than the rest. Measured LAST, so a row that exhausts memory
+# or has to be abandoned cannot block the ones behind it.
+RUN_LAST = ("chronos-bolt-small",)
+
+
 def main(keys):
     rows = []
     tot_before = tot_after = 0
+    # Stable: the heavy rows move to the end, everything else keeps its order.
+    keys = sorted(keys, key=lambda k: k in RUN_LAST)
     for key in keys:
         print(f"  ... {key}", file=sys.stderr, flush=True)
         # One scratch file per model, removed straight after: the off arm
