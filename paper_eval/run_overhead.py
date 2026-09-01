@@ -1,33 +1,14 @@
-"""GraphMend's own compilation overhead (paper Section 5.7, Figure 10).
+"""GraphMend's compilation overhead (paper Section 5.7).
 
     python -m paper_eval.run_overhead [model_key ...]
 
-Section 5.7 compares "the end-to-end wall-clock time of each model executed
-through GraphMend against the same model script running under standard
-Python", with both configurations executing the same script and identical
-inputs, "differing only in whether GraphMend's compilation pipeline is applied
-before execution". This measures exactly that, on the entry program the other
-harnesses already use:
-
-    baseline   python  entry.py     standard Python, no Jac compilation at all
-    graphmend  jac run entry.py     the full pipeline: parse, UniiR, passes,
-                                    GraphMend, bytecode generation
+Times the same entry program end to end under standard Python and under
+`jac run`, cold (empty compiler cache) and cached:
 
     overhead % = (graphmend - baseline) / baseline * 100
 
-Two conditions, as in the paper:
-
-    cold      the compiler cache is empty and every pass executes. Each cold
-              run gets a private XDG_CACHE_HOME, so this neither reads nor
-              destroys the reviewer's own cache.
-    cached    the generated artifacts are reused. Same private cache directory,
-              immediately after the cold run.
-
-The paper reports a mean of 11.5% cold and 1.1% cached across 24 models, and
-notes the cold cost is a fixed one-time charge of roughly 0.5 s per model,
-which is why it shrinks on longer-running workloads.
-
-CPU only. No GPU, no weights, no network for the default model set.
+Each cold run gets a private XDG_CACHE_HOME, so this neither reads nor destroys
+an existing cache. CPU only.
 """
 
 import json

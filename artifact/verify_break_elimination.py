@@ -4,44 +4,23 @@
     python artifact/verify_break_elimination.py t5-small    # a subset
     python artifact/verify_break_elimination.py --offline   # no downloads
 
-Runs every model twice, GraphMend off then on, and reports what the transform
-removed and whether the result survived it. Exit status is non-zero if any row
-fails to run, changes its output, or if no row ran at all.
+Runs every model twice, GraphMend off then on, and reports the breaks found,
+how many were eliminated, and whether the output survived. Exit status is
+non-zero if any row fails to run or changes its output.
 
-The output comparison is the load-bearing half. Eliminating a graph break while
-altering the result is not a fix, so a row whose two arms disagree fails
-outright rather than being reported as a successful reduction.
-
-Correctness is THREE-STATE, not two, and the distinction matters. A row can be
-`identical` (both arms produced the same fingerprint), `CHANGED` (they differ,
-which fails the run), or `n/a` (no fingerprint was available to compare). The
-third case is neither passed nor failed: a row with nothing to compare is not
-evidence either way.
+Correctness is three-state: `identical`, `CHANGED` (which fails the run), or
+`n/a` where no fingerprint was available to compare.
 
 Both arms go through `jac run` with a jac.toml differing only in
-`graphmend_claim_imports`, so what is measured is the compiler's own
-transformation of imported model code, not a hand-edited model file. See
-`paper_eval/README.md` for why the entry program has to be Jac-compiled.
+`graphmend_claim_imports`, so what is measured is the compiler transforming
+imported model code rather than a hand-edited model file.
 
-WHY ROWS TAKE DIFFERENT PATHS. A break count is a property of the code
-TorchDynamo actually traces, so it depends on how a model is built and what it
-is fed. Most rows are insensitive to that and the small random-weight harness
-in `paper_eval/` measures them directly. Five are sensitive and use a
-reference-fidelity build in `gpu/bench.py` instead, each for a reason found by
-reading the reference scripts rather than guessed:
-
-  * BART family (bart-base, bart-large-cnn, rebel-large, opus-mt-fr-en). The
-    guard at modeling_bart.py:568 leads with `dtype == torch.float16`, a static
-    Python bool that Dynamo folds to False in fp32, so the data-dependent
-    breaks do not exist there: 3 instead of 7. The batch matters independently,
-    an `attention_mask` and a decoder input of length ONE.
-
-  * grounding-dino. Not dtype, which the reference pins to fp32 deliberately.
-    It needs the real config, a batch built by the model's own processor from a
-    real image, and `dynamic` left at its default.
-
-NEITHER NEEDS A GPU. What sets those counts is dtype and input, not the device;
-measured on CPU, bart-base reads 3 breaks in fp32 and 7 in fp16.
+Most rows are measured by the small-config harness in paper_eval/. Five are
+sensitive to how the model is built and what it is fed, and use the
+reference-fidelity build in gpu/bench.py instead: the BART family, whose guard
+is gated on `dtype == torch.float16` and so has no data-dependent breaks in
+fp32, and grounding-dino, which needs its real config and a processor-built
+batch. Neither needs a GPU.
 """
 import argparse
 import json

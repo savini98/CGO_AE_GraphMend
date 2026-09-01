@@ -1,21 +1,8 @@
-"""Single-model break-count + output measurement, run under `jac run`.
+"""Single-model break-count and output measurement, run under `jac run`.
 
-This file is the *entry program*, and it must be compiled by Jac for the
-measurement to be valid. GraphMend injects the deferred-side-effect region
-hooks at the `torch.compile(...)` assignment site:
-
-    compiled = torch.compile(model, ...)
-    if hasattr(compiled, 'register_forward_pre_hook'):
-        compiled.register_forward_pre_hook(__jac_se_region_open__)
-        compiled.register_forward_hook(__jac_log_flush_hook__, always_call=True)
-
-The pre-hook is what raises `_gm_se_depth`, and `log_emit` only buffers a
-logger call while that depth is above zero -- otherwise it calls the logger
-inline and the graph break it was meant to remove survives. So running this
-under plain CPython (`python -m ...`) leaves every [Defer] rewrite inert and
-every logger-break model reports 0% fixed. Invoke it as the paper does:
-
-    jac run entry.py          # options before the filename
+This is the entry program, and it must be compiled by Jac: GraphMend injects
+the deferred-side-effect hooks at the `torch.compile(...)` assignment site, so
+under plain CPython no hook is registered and every [Defer] rewrite is inert.
 
 Prints one `GMRESULT <json>` line.
 """
@@ -43,22 +30,12 @@ torch.manual_seed(0)
 model, inputs = spec["build"]()
 model.eval()
 
-# Pin the weights across the two arms.
-#
-# The builders construct from a config with RANDOM weights, and the seed above
-# is what is supposed to make the off and on arms the same model. That holds
-# only while both arms draw from the RNG in the same order and the same number
-# of times, and claiming a module can change that: Florence-2's remote
-# `modeling_florence2.py` consumes the stream differently once GraphMend has
-# recompiled it, so the two arms built models with different weights
-# (param_hash c89e8f25 vs e756ce2a) and the output comparison reported a
-# mismatch that had nothing to do with the rewrite.
-#
-# So the arms no longer rely on the seed agreeing. The first arm writes its
-# state_dict out and the second loads it, which makes "same model" a fact
-# rather than an assumption, and leaves the transform as the only difference
-# between the two runs. strict=True on purpose: a structural difference between
-# the arms must fail loudly here, not be absorbed.
+# Pin the weights across the two arms. The builders construct from random
+# weights, and a shared seed only makes the arms identical while both draw from
+# the RNG identically, which claiming a module can change. The first arm writes
+# its state_dict and the second loads it, so the transform is the only
+# difference between the runs. strict=True: a structural mismatch must fail
+# loudly rather than be absorbed.
 _state = os.environ.get("GM_STATE")
 if _state:
     if os.path.exists(_state):
@@ -66,18 +43,12 @@ if _state:
     else:
         torch.save(model.state_dict(), _state)
 
-# Paper 5.6: full-graph capture for serving frameworks. vLLM requires model
-# code to be capturable via `torch.compile(fullgraph=True)`, and SGLang's
-# piecewise CUDA graph relies on the same capture; a single graph break fails
-# the requirement. `backend="eager"` isolates Dynamo's capture from backend
-# compilation, so this measures graph-break elimination and nothing else. It
-# needs no GPU and is deterministic: the off arm must fail and the on arm must
-# succeed.
-#
-# Restricted to models whose breaks live on the forward path. For the handful
-# whose breaks are on the generation path, `fullgraph=True` over `generate()`
-# fails in BOTH arms on the Python-level decode loop, which says nothing about
-# GraphMend, so those are reported as skipped rather than as a false result.
+# Paper 5.6: full-graph capture. `backend="eager"` isolates Dynamo's capture
+# from backend compilation, so this measures graph-break elimination alone, on
+# CPU and deterministically. Restricted to models whose breaks are on the
+# forward path: where they are on the generation path, fullgraph=True over
+# generate() fails in both arms on the decode loop and says nothing about
+# GraphMend, so those rows are skipped.
 if os.environ.get("GM_CHECK") == "fullgraph":
     if spec.get("call") == "generate":
         print("GMRESULT " + json.dumps({

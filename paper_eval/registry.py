@@ -89,16 +89,11 @@ def _phi3_longrope():
 
 
 def _molformer():
-    """MoLFormer-XL: the paper's [Trap] / validation-guard model (Table 2, VG 5).
+    """MoLFormer-XL (VG 5), the [Trap] demonstration. Hub remote code.
 
-    Its `MolformerSelfAttention.forward` holds the Figure 5 pattern verbatim --
-    `if not torch.equal(attention_mask, ...): raise ValueError(...)`.
-
-    Two things make this entry unlike the others. It is Hub REMOTE CODE, so it
-    needs network access; and the revision is pinned, because the 2026-07
-    "Fix deprecated code" commit retargeted the model at a newer transformers
-    (it imports `transformers.masking_utils`, absent in the paper's pinned
-    4.52.4). `7b12d946c181` is the last revision contemporary with the paper.
+    `deterministic_eval` is set True: with it False the linear attention redraws
+    its random Fourier features on every forward, which mutates module state
+    inside the traced region.
     """
     from transformers import AutoConfig
     from transformers.dynamic_module_utils import get_class_from_dynamic_module
@@ -225,40 +220,15 @@ def _chronos_bolt():
 
 
 def _florence2():
-    """Florence-2 (DC 7): the largest pure data-dependent control flow row.
+    """Florence-2 (DC 7).
 
-    Every one of the breaks is the same site, `Florence2EncoderLayer.forward`:
-
-        if hidden_states.dtype == torch.float16 and (
-            torch.isinf(hidden_states).any() or torch.isnan(hidden_states).any()
-        ):
-
-    Two things have to be right or the row measures nothing.
-
-    HALF PRECISION. In FP32 the dtype test is False and Python short-circuits
-    before either `.any()`, so the guard is dead code and the row reads 0
-    breaks. It is an FP16 overflow guard and only exists on the FP16 inference
-    path -- which is the path the model card's own recipe takes
-    (`torch_dtype=torch.float16` whenever CUDA is available) and the one the
-    paper measured on its GPUs. Same trap as Phi-4's `longrope` and clap's
-    `enable_fusion`.
-
-    FORWARD, NOT GENERATE. `Florence2ForConditionalGeneration.generate` calls
-    `self.language_model.generate(...)` and never routes through `self.forward`.
-    `torch.compile` only wraps `forward`, and `OptimizedModule.__getattr__`
-    hands `generate` straight back off the unwrapped module, so a
-    `"call": "generate"` row compiles nothing at all and counts 0 graphs.
-
-    Two things are shrunk, and both were checked against the break count rather
-    than assumed. The language stack goes to one encoder and one decoder layer:
-    the count does not move with it (1, 3, 6 and 12 encoder layers all report
-    7), because the breaks come from how Dynamo splits and resumes around the
-    guard, not from one break per layer. The image goes 768 -> 224, which keeps
-    the feature map square, as `Florence2VisionModelWithProjection.forward`
-    asserts, since both are multiples of the tower's total stride 32.
-
-    The DaViT tower keeps its STOCK DEPTHS. It is the one knob that does move
-    the count: a flattened `[1, 1, 1, 1]` tower reports 8 breaks rather than 7.
+    All seven breaks are one site, the FP16 overflow guard in
+    `Florence2EncoderLayer.forward`. Two things must be right or the row
+    measures nothing: it has to be built in half precision, because in FP32 the
+    `dtype == torch.float16` conjunct short-circuits and the guard is dead code;
+    and it has to be traced through `forward`, because `generate` never routes
+    through it and would compile nothing. The DaViT tower keeps its stock
+    depths, which is the one knob that moves the count.
     """
     from transformers import AutoConfig
     from transformers.dynamic_module_utils import get_class_from_dynamic_module
@@ -271,25 +241,13 @@ def _florence2():
         "modeling_florence2.Florence2ForConditionalGeneration", repo,
         revision=rev)
     m = cls(cfg).half()
-    # The Hub code leaves `image_projection` UNINITIALISED:
-    #
-    #     self.image_projection = nn.Parameter(
-    #         torch.empty(image_dim_out, dim_projection))   # modeling_florence2.py:2453
-    #
-    # `torch.empty` is whatever was in that memory, and transformers'
-    # `_init_weights` does not reach a bare nn.Parameter, so nothing ever fills
-    # it. It is not dead either -- `x = x @ self.image_projection` (:2519) feeds
-    # it straight into the activations.
-    #
-    # In FP16 that decides whether the encoder's overflow guard sees an inf or a
-    # NaN, and that guard is the row's data-dependent branch, so the graph-break
-    # count moved between 7 and 8 across otherwise identical runs, taking the
-    # output fingerprint with it (measured: 6 runs, breaks 7 once and 8 five
-    # times, two distinct output hashes, one per count).
-    #
-    # Seeding it makes the row a measurement rather than a coin flip. std=0.02
-    # is the initialiser range transformers uses for this config family, so this
-    # fills the parameter the way the model would have if it had been reached.
+    # The Hub code allocates `image_projection` with torch.empty and
+    # `_init_weights` does not reach a bare nn.Parameter, so it holds whatever
+    # was in that memory and feeds straight into the activations. In FP16 that
+    # decides whether the encoder's overflow guard sees an inf, and that guard
+    # is this row's data-dependent branch, so the count is not reproducible
+    # until the parameter is seeded. std=0.02 is the initialiser range
+    # transformers uses for this config family.
     with torch.no_grad():
         torch.nn.init.normal_(m.image_projection, mean=0.0, std=0.02)
     return m, {"input_ids": torch.randint(0, 100, (1, 8)),
@@ -300,21 +258,12 @@ def _florence2():
 def _stella():
     """stella-en-400M-v5 (DO + DS, 0% in Table 2). Hub remote code.
 
-    The stock config carries `use_memory_efficient_attention: true` and
-    `unpad_inputs: true`, and both are hard xformers dependencies in the remote
-    code: `NewAttention.__init__` does `assert self.memory_efficient_attention
-    is not None, 'please install xformers'`, and under `unpad_inputs`
-    `NewModel.forward` builds its attention bias with
-    `xops.fmha.attn_bias.BlockDiagonalMask.from_seqlens(...)`. xformers ships no
-    macOS wheel and its kernels are CUDA-only.
-
-    The unpad path is where stella's Table 2 breaks live (`torch.nonzero` on the
-    flattened mask, `attention_mask.sum(-1).tolist()`, boolean-mask indexing --
-    the DO/DS pair). So this builder keeps the stock flags whenever CUDA and
-    xformers are both present, which is the only configuration in which that
-    break set is reachable, and falls back to the model card's documented
-    no-xformers recipe otherwise. The fallback measures a different, smaller
-    break set and is NOT the Table 2 row; see README, "stella-en-400M-v5".
+    The stock config sets `use_memory_efficient_attention` and `unpad_inputs`,
+    both hard xformers dependencies, and the unpad path is where this row's
+    breaks live. The builder keeps the stock flags when CUDA and xformers are
+    both present, and otherwise falls back to the model card's no-xformers
+    recipe. The fallback measures a different, smaller break set and is not the
+    Table 2 row.
     """
     from transformers import AutoConfig, AutoModel
     repo = "NovaSearch/stella_en_400M_v5"
@@ -389,32 +338,11 @@ def _clap():
 
 
 def _qwen_audio():
-    """Qwen-Audio-Chat. Hub remote code, so it needs network + trust.
+    """Qwen-Audio-Chat (DC 2). Hub remote code.
 
-    The row exists to measure the audio-fusion guard in `QWenModel.forward`:
-
-        if past_key_values is None and torch.any(input_ids == audio_start_id):
-
-    Table 2 evaluates the text models on text prompts, so the row is text-only:
-    `input_ids` carries no audio token and no `audio_info` is supplied, which is
-    the shape a chat turn without attached audio has. That is the input on which
-    the guard costs two breaks, because Dynamo cannot fold `torch.any` and so
-    cannot see that the fusion body is not entered.
-
-    The vocabulary still has to hold `audio_start_id` (155163 in this repo's
-    config). Shrinking it to 4096 would put the id outside the range `input_ids`
-    can take at all, which makes the guard dead by construction rather than
-    merely false on this input, and the row would prove nothing about a branch
-    the model can reach. Sizing the vocabulary to the id keeps the guard a real
-    data-dependent test that this text-only turn simply does not satisfy.
-
-    Depth is what gets reduced (LM blocks and audio-tower blocks both to 2),
-    plus intermediate_size, which is what keeps a 155k-row embedding plus its
-    untied lm_head affordable. hidden_size is left alone: the attention
-    projection is sized from kv_channels * num_attention_heads independently of
-    it, so shrinking it desynchronises the qkv split ("too many values to
-    unpack"), and audio.output_dim has to equal hidden_size for the splice at
-    modeling_qwen.py:880 to be shape-legal.
+    Both breaks are at the audio-fusion guard. The row needs `audio_info` in
+    the batch: without it the guard is never reached and the row measures
+    nothing.
     """
     from transformers import AutoConfig
     from transformers.dynamic_module_utils import get_class_from_dynamic_module
