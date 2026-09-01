@@ -80,8 +80,25 @@ def _run(key, mode):
         shutil.rmtree(workdir, ignore_errors=True)
 
 
+# Rows that download weights or remote code. Named here rather than in the
+# caller so the break-elimination step and this one cannot disagree about the
+# set: both take --offline to mean the same thing.
+NETWORK = {"MoLFormer-XL-both10pct", "Florence-2", "Qwen-Audio-Chat",
+           "chronos-bolt-small", "moe-minicpm-x4-base", "stella-en-400M-v5"}
+
+
 def main(argv):
+    offline = "--offline" in argv
+    argv = [a for a in argv if a != "--offline"]
+    bad = [a for a in argv if a.startswith("-")]
+    if bad:
+        sys.exit(f"unknown option(s): {', '.join(bad)}")
     keys = argv or [k for k in MODELS if k not in PARTIAL]
+    if offline:
+        keys = [k for k in keys if k not in NETWORK]
+    if not keys:
+        sys.exit("no rows selected (every named row needs network, "
+                 "and --offline was given)")
     print(f"{'model':32s} {'off':>10s} {'on':>10s}  verdict")
     print("-" * 68)
     failed = 0

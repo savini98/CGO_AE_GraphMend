@@ -141,47 +141,44 @@ bash artifact/run_all.sh --suites
 **Expected:** `18 passed`, `0 skipped` — `[Trap]` 6, `[Where]` 3, `[Defer]` 7,
 import-claiming 2. CPU, ~1-3 min.
 
-### Claim 2: graph breaks are eliminated at Table 2's fix rates
+### Claim 2: graph breaks are eliminated, and the output is unchanged
 
-*Paper §5.1, Table 2.* Each model's forward pass runs through a counting
-TorchDynamo backend in two isolated subprocesses, GraphMend off then on.
-
-```bash
-bash scripts/run_break_analysis.sh                         # 21 offline rows
-bash scripts/run_break_analysis.sh Phi-4-mini-instruct     # Figure 3 example
-GM_NETWORK=1 bash scripts/run_break_analysis.sh            # the 6 network rows
-python -m paper_eval.run_why longformer-base-4096 on       # why a break survives
-```
-
-**Expected:** the table below, ending `TOTAL 89 19 78%`. CPU, ~1.5-3 h on a
-cold cache; individual rows are minutes. The six rows needing network and
-`trust_remote_code` are opt-in and run by name.
-
-### Claim 3: the transformed model produces identical output
-
-*Paper §5.1.* Same two-arm run as Claim 2, reporting a different column, so
-`scripts/run_correctness.sh` is the same command under the name the claim uses.
-It compares a SHA-256 fingerprint of the output between arms, with both arms
-pinned to the same weights; generative rows compare a greedy-decoded token
-sequence over 16 steps.
-
-**Expected:** `output_ok` is `yes` on **every** row, including rows that fix
-nothing.
-
-### Claim 4: full-graph capture for serving
-
-*Paper §5.6.* vLLM and SGLang require `torch.compile(fullgraph=True)`, which a
-single graph break defeats.
+*Paper §5.1, Table 2, and §5.6.* One script covers the whole claim. Every model
+runs twice, GraphMend off then on, through `jac run` with a `jac.toml`
+differing only in `graphmend_claim_imports` — so what is measured is the
+compiler transforming imported model code, not a hand-edited model file.
 
 ```bash
-bash scripts/run_fullgraph.sh
+bash artifact/run_break_analysis.sh              # every model
+bash artifact/run_break_analysis.sh --offline    # skip rows needing downloads
+bash artifact/run_break_analysis.sh t5-small     # a subset, for a quick check
 ```
 
-**Expected:** `off failed / on ok` on every row. Asymmetric by construction —
-both-pass or both-fail is a FAIL. `backend="eager"` isolates capture from
-compilation, so it is deterministic and needs no GPU. ~10 min.
+**Expected:** a row per model giving breaks found, breaks eliminated, and
+whether the two arms produced a bit-identical output — then
+`torch.compile(fullgraph=True)` failing on every original model and succeeding
+on every transformed one.
 
-### Claim 5: latency and throughput
+Correctness is the load-bearing half. Eliminating a graph break while altering
+the result is not a fix, so a row whose arms disagree **fails the run** rather
+than counting as a successful reduction. A row with no fingerprint to compare
+reports `n/a` and is neither passed nor failed. Exit status is 0 only if every
+row ran, no row changed its output, and full-graph capture flipped on every row.
+
+Full-graph capture is the sub-claim: it is what break elimination buys. vLLM
+and SGLang require `fullgraph=True`, which a single break defeats, so the check
+is asymmetric by construction — a both-pass result is a failure, not a win.
+`backend="eager"` isolates Dynamo's capture from backend compilation, so it is
+deterministic and needs no GPU.
+
+To see why a particular break survives, which is what distinguishes a correctly
+unfixed row from a defect:
+
+```bash
+python -m paper_eval.run_why longformer-base-4096 on
+```
+
+### Claim 3: latency and throughput
 
 *Paper §5.2-5.4, Table 2 and Figure 9.* The speedups follow from eliminating breaks rather than
 standing on their own, and they need the NVIDIA hardware of §5, so they are not
@@ -214,7 +211,7 @@ so a fixed bound would fail honest runs on different hardware.
 [`gpu/from_trace.py`](gpu/from_trace.py) reports cold start, steady state and
 launch counts from a trace pair `bench.py --save-traces` wrote.
 
-### Claim 6: GraphMend's own compilation overhead
+### Claim 4: GraphMend's own compilation overhead
 
 *Paper §5.7, Figure 10.* Times the same entry program end to end under standard
 Python and under `jac run`, cold (empty compiler cache) and cached.
@@ -342,9 +339,6 @@ CGO_AE_GraphMend/
 │   ├── setup.sh            #   pin check + patch + typeshed stubs; idempotent
 │   ├── run_quick.sh        #   functional workflow, ~10-20 min
 │   ├── run_full.sh         #   full reproduction
-│   ├── run_break_analysis.sh    # Table 2
-│   ├── run_correctness.sh       # Section 5.1
-│   ├── run_fullgraph.sh         # Section 5.6
 │   ├── run_latency.sh           # Table 2, Sections 5.2-5.3   (GPU)
 │   ├── run_throughput.sh        # Figure 9, Section 5.4       (GPU)
 │   ├── run_compiler_overhead.sh # Figure 10, Section 5.7
@@ -363,6 +357,8 @@ CGO_AE_GraphMend/
     ├── Dockerfile.cpu      #   the supported path; pins torch and transformers
     ├── Dockerfile.cuda     #   GPU image for the latency script
     ├── run_all.sh          #   PASS/FAIL kick-the-tires runner
+    ├── run_break_analysis.sh    # Claim 2: the whole claim, one entry point
+    ├── verify_break_elimination.py  # the measurement it drives
     ├── jac.toml            #   config for commands typed in this directory
     ├── minimal_example.py  #   smallest correct own-script template
     └── gpu/                #   bench.py, from_trace.py, run_reproducible.sh

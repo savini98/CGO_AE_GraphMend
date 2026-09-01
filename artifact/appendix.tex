@@ -148,17 +148,17 @@ Each claim has one script, named for it.
 
 {\small
 \begin{itemize}\itemsep0pt
-  \item \texttt{run\_break\_analysis.sh} $\rightarrow$
-    Table~\ref{tab:benchmark}: \textbf{21 models fully fixed, 3 partially, 3
-    unfixed}, with 25 of 27 rows matching the fix rate.
-    \texttt{grounding-dino} reads 56\% against 58\%, one break in seventeen.
-  \item \texttt{run\_correctness.sh} $\rightarrow$ Section~\ref{sec:eval}:
-    \texttt{output\_ok} is \texttt{yes} on all 27 rows, including those that fix
-    nothing. FP32 outputs are bit-identical and greedy-decoded token sequences
-    agree.
-  \item \texttt{run\_fullgraph.sh} $\rightarrow$ Section~\ref{sec:serving}:
-    \texttt{fullgraph=True} fails on every original model and succeeds on every
-    transformed one. Both-pass or both-fail is a failure.
+  \item \texttt{artifact/run\_break\_analysis.sh} $\rightarrow$
+    Table~\ref{tab:benchmark} and Section~\ref{sec:serving}. One entry point
+    covers the whole claim, because break elimination, output correctness and
+    full-graph capture are three columns of one two-arm run over the same
+    models. Expect \textbf{21 models fully fixed, 3 partially, 3 unfixed},
+    with 25 of 27 rows matching the fix rate
+    (\texttt{grounding-dino} reads 56\% against 58\%, one break in
+    seventeen); a bit-identical output on every row carrying a comparison; and
+    \texttt{fullgraph=True} failing before the transform and succeeding after
+    it on every row. Correctness is load-bearing: a row whose arms disagree
+    fails the run rather than counting as a reduction.
   \item \texttt{run\_latency.sh} $\rightarrow$
     Sections~\ref{sec:coldstart}--\ref{sec:steadystate}: breaks reach zero,
     CUDA-graph launches per forward collapse to one, and cold start improves.
