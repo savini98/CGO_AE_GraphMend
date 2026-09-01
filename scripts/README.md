@@ -48,8 +48,7 @@ C3 are in [`artifact/README.md`](../artifact/README.md).
 bash scripts/make_archive.sh [output.tar.gz]
 ```
 
-Builds the self-contained tarball for the archival deposit. `git archive` skips
-submodule contents, so an archive made with it would ship an empty `jaseci/`;
-this flattens the submodule in and records the pinned commit in `ARCHIVE_INFO`.
+Packs the repository and the `jaseci/` submodule into one standalone tarball
+for the archival deposit.
 
 For the authors preparing a release. Reviewers do not need it.
