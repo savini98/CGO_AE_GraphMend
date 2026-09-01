@@ -45,7 +45,7 @@ bash scripts/setup.sh
 
 This applies [`patches/graphmend.patch`](../patches/graphmend.patch) to the
 pinned `jaseci/` submodule and fetches the typeshed stubs. Nothing compiles
-without it. It is idempotent, so it is safe to re-run.
+without it. Running it again is safe.
 
 You also need Python 3.13 with `torch==2.12.1`, `transformers==4.52.4`,
 `numpy==2.4.6` and `torchvision==0.27.1`.

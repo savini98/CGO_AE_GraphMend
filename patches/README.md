@@ -25,16 +25,19 @@ The 37 modified files are the integration points. The rest is new code.
 
 ## Applying it
 
-`scripts/setup.sh` does this for you, and is idempotent:
+Run:
 
 ```bash
 bash scripts/setup.sh
 ```
 
-It applies the patch with `git apply -p1` inside the submodule, then fetches
-the typeshed stubs. The patch is generated against the pinned commit and will
-not apply to another one, which is the check that the submodule is at the right
-revision.
+That applies the patch with `git apply -p1` inside the submodule, then fetches
+the typeshed stubs. Running it again is safe: it sees an already-patched tree
+and stops.
 
-After it runs, the submodule's working tree is intentionally dirty. That is the
-patched compiler, and it is the `jaclang` every measurement imports.
+The patch only applies to the pinned commit, so if it applies, the submodule is
+at the right revision.
+
+Afterwards `git status` shows the submodule as modified. That is expected: the
+patched tree is the compiler, and it is the `jaclang` every measurement
+imports.
