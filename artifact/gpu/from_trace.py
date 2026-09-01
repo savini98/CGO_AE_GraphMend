@@ -10,7 +10,7 @@ executes, so the interval between consecutive markers for the first region is
 one iteration: cold is the first interval, warm the median of the rest.
 
 Magnitudes depend on the card, the driver and the batch size. What does not is
-the mechanism, which is what run_reproducible.sh gates on: breaks reaching zero
+the mechanism, which is what the C3 script gates on: breaks reaching zero
 and CUDA-graph launches per forward collapsing to one.
 """
 import argparse

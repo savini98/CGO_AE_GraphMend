@@ -130,18 +130,18 @@ modeling code genuinely was transformed so nothing looks wrong.
 
 ---
 
-## Two workflows
+## One pathway
 
 ```bash
-bash scripts/run_quick.sh    # functional check, ~10-20 min, CPU, no network
-bash scripts/run_full.sh     # full reproduction, hours; GPU steps auto-skip
+bash artifact/run_break_analysis.sh --c1 t5-small   # one row, a few minutes
+bash artifact/run_break_analysis.sh                 # C1 and C2, every row
+python artifact/run_latency_analysis.py             # C3, the 10-row sample
 ```
 
-`run_quick.sh` answers the artifact-evaluation question -- all three
-transformations execute, graph breaks disappear, outputs stay equal -- without
-reproducing the model suite or any performance number. `run_full.sh` runs each
-per-claim script below in turn, skipping the two GPU steps where no CUDA device
-is visible rather than failing them.
+Inside the image the same three are `graphmend c1`, `graphmend` and
+`graphmend c3`. There is one script per claim and no second route to any of
+them, deliberately: a reviewer should not have to work out which of two
+runners measures the thing being claimed.
 
 ## Claims validation
 
@@ -360,20 +360,15 @@ CGO_AE_GraphMend/
 ├── jac.toml                # GraphMend keys + the toolchain pointer
 ├── jaseci/                 # upstream jaclang, submodule pinned at e2b6b9f4b
 ├── patches/graphmend.patch # everything GraphMend adds (203 files)
-├── scripts/                # one script per claim, plus the two workflows
+├── scripts/
 │   ├── setup.sh            #   pin check + patch + typeshed stubs; idempotent
-│   ├── run_quick.sh        #   functional workflow, ~10-20 min
-│   ├── run_full.sh         #   full reproduction
-│   ├── run_latency.sh           # Table 2, Sections 5.2-5.3   (GPU)
-│   ├── run_throughput.sh        # Figure 9, Section 5.4       (GPU)
-│   ├── run_compiler_overhead.sh # Figure 10, Section 5.7
+│   ├── run_throughput.sh   #   Figure 9, Section 5.4 (GPU)
 │   └── make_archive.sh     #   self-contained tarball for the Zenodo deposit
 ├── paper_eval/             # reproduction harness
 │   ├── registry.py         #   per-model builders and inputs
 │   ├── run_eval.py         #   two-arm runner (C1)
 │   ├── run_fullgraph.py    #   full-graph capture (C2)
 │   ├── run_why.py          #   per-break cause reporting
-│   ├── run_overhead.py     #   compiler overhead (Section 5.7, not a claim)
 │   ├── entry.py            #   the measurement program, run under `jac run`
 │   └── _paths.py           #   where the toolchain and the harness live
 └── artifact/               # this package
@@ -381,7 +376,6 @@ CGO_AE_GraphMend/
     ├── appendix.tex        #   artifact appendix, for the paper
     ├── Dockerfile           #   one image, all three claims
     ├── run.sh               #   entry point: c1 / c2 / c3
-    ├── run_all.sh          #   PASS/FAIL kick-the-tires runner
     ├── run_break_analysis.sh    # C1 and C2; --c1 / --c2 to run one
     ├── run_latency_analysis.py  # C3; --full for stage 2
     ├── verify_fixed.py          #   gate the fixed sources before timing them
@@ -390,7 +384,7 @@ CGO_AE_GraphMend/
     ├── verify_break_elimination.py  # the measurement it drives
     ├── jac.toml            #   config for commands typed in this directory
     ├── minimal_example.py  #   smallest correct own-script template
-    └── gpu/                #   bench.py, from_trace.py, run_reproducible.sh
+    └── gpu/                #   bench.py, from_trace.py
 ```
 
 ---
@@ -398,7 +392,7 @@ CGO_AE_GraphMend/
 ## Troubleshooting
 
 **Every row reads `N -> N, 0% fixed`.** One of the two ways to measure nothing,
-above. `run_all.sh` detects the all-unchanged case and says so.
+above. The C1 run detects the all-unchanged case and says so.
 
 **`no GraphMend passes under .../jaseci/jac`.** The submodule is not
 initialised or the patch is not applied:
