@@ -1,57 +1,6 @@
-# Artifact-level Jac configuration.
-#
-# `jac` resolves configuration to the NEAREST ANCESTOR jac.toml: it walks up
-# from the working directory, the nearest file wins, and files further up are
-# not merged in. This file therefore governs any command run from the
-# repository root or a subdirectory of it.
-#
-# It replaces what used to be jaclang's own project manifest. That manifest now
-# lives where it belongs, inside the pinned submodule at jaseci/jac.toml, so
-# this repository presents itself as an artifact rather than as a fork of the
-# compiler.
-#
-# The paper_eval harness does NOT read this file: run_eval.py writes a fresh
-# jac.toml per arm into a private temporary directory, because the two arms
-# differ only in the two keys below and there is no CLI switch for them. This
-# file exists so a command a reviewer types by hand behaves like the harness.
-
-# Reroute `import jaclang` to the patched toolchain in the submodule, so the
-# `jac` binary compiles with GraphMend rather than with its own bundled copy.
-#
-# This stanza is NOT inherited. `_dev_source_from_toml` reads the NEAREST
-# jac.toml and nothing above it, so every directory a reviewer types commands
-# in needs its own copy -- see artifact/jac.toml, which carries the same key
-# with its own relative path. Without it the failure is silent: any released
-# jaclang predates GraphMend, so the run completes and fixes nothing.
-#
-# JAC_NO_DEV_SOURCE=1 forces it off for a single command.
 [dev]
-jaclang_source = "jaseci/jac"   # dir CONTAINING jaclang/, relative to this file
+jaclang_source = "jaseci/jac"
 
 [run]
-
-# GraphMend itself. Already `true` by default in the toolchain; written out so
-# this file documents both halves of the switch rather than the surprising half
-# only. Setting it false disables all three rules, which is the harness's "off"
-# arm.
 graphmend = true
-
-# THE OPT-IN THAT MATTERS. Default is `false` in the toolchain.
-#
-# Claiming and recompiling IMPORTED third-party code is a separate consent
-# decision from enabling GraphMend. Every Hugging Face model in this evaluation
-# is imported third-party code (`transformers.models.*`, or
-# `transformers_modules.*` for Hub remote code), so with the stock default
-# GraphMend transforms nothing and a graphmend-on run measures exactly what a
-# graphmend-off run measures.
-#
-# Symptom of forgetting it: every row reads "N -> N, 0% fixed", with no error,
-# warning or diagnostic printed anywhere.
 graphmend_claim_imports = true
-
-# Optional ablation knob, unset here. Comma-separated rules to skip:
-#   trap  = validation-guard lowering
-#   where = predicated control flow
-#   defer = side-effect (logger / warnings.warn) deferral
-# Also available as `jac run --graphmend_disable defer program.py`.
-# graphmend_disable = ""
