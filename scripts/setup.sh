@@ -115,5 +115,5 @@ cat <<EOF
 
     torch and transformers must be importable. If they are not, use the
     container instead, which pins them:
-      docker build -f artifact/Dockerfile.cpu -t graphmend-cpu .
+      docker build -f artifact/Dockerfile -t graphmend .
 EOF

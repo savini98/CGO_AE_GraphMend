@@ -92,7 +92,7 @@ TRANSFORMERS_V="$(printf '%s\n' "$VERSIONS" | awk '$1=="transformers"{print $2}'
 if [ "$TORCH_V" = "MISSING" ] || [ "$TRANSFORMERS_V" = "MISSING" ]; then
     echo
     echo "  torch and transformers are required. See artifact/README.md, or use"
-    echo "  the container: docker build -f artifact/Dockerfile.cpu -t graphmend-cpu ."
+    echo "  the container: docker build -f artifact/Dockerfile -t graphmend ."
     exit 2
 fi
 

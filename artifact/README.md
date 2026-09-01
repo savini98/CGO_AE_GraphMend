@@ -41,23 +41,27 @@ everything GraphMend adds: 203 files, 166 of them new, no deletions.
 
 ### Option 1: Docker (recommended)
 
+One image covers all three claims.
+
 ```bash
 git clone --recurse-submodules <url> && cd CGO_AE_GraphMend
-docker build -f artifact/Dockerfile.cpu -t graphmend-cpu .   # ~5 min
-docker run --rm graphmend-cpu                                # smoke test
-docker run --rm -it --entrypoint bash graphmend-cpu          # poke around
+docker build -f artifact/Dockerfile -t graphmend .
+
+docker run --gpus all --memory=20g graphmend            # C1 then C2
+docker run --gpus all --memory=20g graphmend c1         # C1 only
+docker run --gpus all --memory=20g graphmend c2         # C2 only
+docker run --gpus all --memory=20g graphmend c3         # C3, the 10-row sample
+docker run --gpus all --memory=20g graphmend c3 --full  # C3, every row
+docker run --rm -it graphmend bash                      # a shell in the image
 ```
 
-C1 and C2 run on the CPU image. Four rows (the BART family) and both
-`grounding-dino` rows are measured through `gpu/bench.py`, which reproduces
-Table 2's half-precision counts, and C3 needs a card, so the GPU image is the
-one to build for a complete run:
+Arguments after the selector are forwarded, so `graphmend c1 t5-small` and
+`graphmend c1 --offline` work.
 
-```bash
-docker build -f artifact/Dockerfile.cuda -t graphmend-cuda .
-docker run -d --gpus all --memory=20g --entrypoint bash graphmend-cuda \
-    -lc "cd /opt/artifact && bash artifact/run_break_analysis.sh"
-```
+**A GPU is optional for C1 and C2.** Drop `--gpus all` and they measure the
+same numbers, with one exception: `stella-en-400M-v5` uses its unpadding path
+only when a device is visible, and without one it takes the model card's
+fallback and measures a different row. C3 needs a card.
 
 Add `-v ~/.cache/huggingface:/hf -e HF_HOME=/hf` to keep the six network rows'
 downloads across runs; without it each run re-fetches them.
@@ -202,42 +206,54 @@ full-graph capture flipped on every row it was checked for.
 
 ### C3: eliminating graph breaks enables downstream cold-start and steady-state gains
 
-*Paper §5.2-5.4, Table 2 and Figure 9.* The speedups follow from eliminating
-breaks rather than standing on their own, and they need the NVIDIA hardware of
-§5. We ship no recorded traces or saved results — an output file we produced is
-not something a reviewer can check — so this is a script that measures on your
-own card:
+*Paper §5.2-5.4, Table 2 and Figure 9.* Removing breaks gives PyTorch larger
+regions to optimize, so this measures what C1's transformation buys.
+
+**The compiler is not in the measured window.** Both arms are plain CPython
+importing plain Python: the original arm is stock `transformers`, and the fixed
+arm is the same tree with GraphMend's *output* copied over the modules it
+transformed, from [`fixed_models/`](fixed_models/). That is the paper's own
+methodology, and it is why each arm takes seconds rather than the minutes a
+compile would add inside the profiled region.
+
+**Two stages.** Stage 1 is a 10-row sample; stage 2 is every row and costs
+about four times as long.
 
 ```bash
-bash scripts/run_latency.sh        # cold start and steady state; needs a GPU
-bash scripts/run_throughput.sh     # Figure 9; needs a GPU
+python artifact/run_latency_analysis.py            # stage 1, the 10-row sample
+python artifact/run_latency_analysis.py --full     # stage 2, every row
+python artifact/run_latency_analysis.py --list     # what would run, and why not
 ```
 
-It builds each model from real pretrained weights, gives each arm a private
-TorchInductor cache so cold start is genuinely cold, and gates only on what is
-hardware-independent: graph breaks reaching zero, and CUDA-graph launches per
-forward collapsing to one (t5-small 4 → 1, MoLFormer-XL 50 → 1, Phi-4-mini
-5 → 1). Cold start is gated with a wide 1.5× floor rather than an expected
-value. Steady state and throughput are printed but not gated. A different GPU
-will not land on Table 2's magnitudes and is not meant to.
+The sample is chosen for coverage rather than speed: every rule fires at least
+once (`[Trap]` on MoLFormer and grounding-dino-base, `[Where]` on Phi-4-mini
+and Qwen-Audio-Chat, `[Defer]` on the rest), every input modality appears
+(text, speech, vision, time series), and both ends of the agreement range are
+present.
 
-Stated as expected variation: break counts, launch counts, output fingerprints
-and full-graph capture are deterministic and must match exactly. Cold start
-must clear 1.5× on any CUDA device — the paper's RTX 3090 measures 3.5× to
-24.7× on the three benchmarked models. Steady state and throughput carry no
-validation threshold, deliberately: both move with the card and the batch size,
-so a fixed bound would fail honest runs on different hardware.
+**Expected:** cold start in the single to low double digits and inversely
+related to batch size — the same model reads 3.49× at batch 1345 and 15.66× at
+8×128 — with steady state within a few percent of 1.0×. Not compared to Table 2
+row by row, because the paper's figures hold at its own batch sizes. Needs an
+NVIDIA card.
 
-[`gpu/bench.py`](gpu/bench.py) can be called on one model
-(`--count`, `--json`, `--paper-batch`, `--save-traces`), and
-[`gpu/from_trace.py`](gpu/from_trace.py) reports cold start, steady state and
-launch counts from a trace pair `bench.py --save-traces` wrote.
+**The fixed sources are compiler output, and that is checkable rather than
+asserted.** Every file ships beside its `.original.py`, and
+
+```bash
+python artifact/gen_fixed_models.py        # regenerate, then diff
+python artifact/verify_fixed.py            # gate: they must remove the same breaks
+```
+
+`verify_fixed.py` is a prerequisite, not an extra: a fixed source that leaves
+breaks behind still produces a tidy speedup number, and that number means
+nothing.
 
 ---
 
 ## Results
 
-Measured inside `artifact/Dockerfile.cpu` on torch 2.12.1 and transformers
+Measured inside `artifact/Dockerfile` on torch 2.12.1 and transformers
 4.52.4, so `docker run` executes the same binary that produced them.
 
 | | |
@@ -363,10 +379,14 @@ CGO_AE_GraphMend/
 └── artifact/               # this package
     ├── README.md           #   this file
     ├── appendix.tex        #   artifact appendix, for the paper
-    ├── Dockerfile.cpu      #   the supported path; pins torch and transformers
-    ├── Dockerfile.cuda     #   GPU image; needed for C3 and the GPU rows
+    ├── Dockerfile           #   one image, all three claims
+    ├── run.sh               #   entry point: c1 / c2 / c3
     ├── run_all.sh          #   PASS/FAIL kick-the-tires runner
     ├── run_break_analysis.sh    # C1 and C2; --c1 / --c2 to run one
+    ├── run_latency_analysis.py  # C3; --full for stage 2
+    ├── verify_fixed.py          #   gate the fixed sources before timing them
+    ├── gen_fixed_models.py      #   regenerate fixed_models/ from the compiler
+    ├── fixed_models/            #   GraphMend's output, beside the originals
     ├── verify_break_elimination.py  # the measurement it drives
     ├── jac.toml            #   config for commands typed in this directory
     ├── minimal_example.py  #   smallest correct own-script template

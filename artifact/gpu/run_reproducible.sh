@@ -78,7 +78,7 @@ if not torch.cuda.is_available():
         "  The break-elimination and correctness claims do not need a GPU;\n"
         "  use artifact/run_all.sh for those. If this is the CUDA container\n"
         "  without --gpus, see the device-passthrough recipe in the header of\n"
-        "  artifact/Dockerfile.cuda."
+        "  artifact/Dockerfile."
     )
 print(f"  torch       {torch.__version__} (cuda {torch.version.cuda})")
 print(f"  device      {torch.cuda.get_device_name(0)}")

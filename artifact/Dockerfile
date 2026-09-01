@@ -1,7 +1,16 @@
-# GraphMend CGO 2027 artifact: CUDA image, for the latency and throughput
-# claims C8, C9 and C10: up to 26x cold-start forward pass speedup (5x on
-# average), up to 1.39x steady-state forward pass speedup, and up to 15%
-# throughput improvement, on NVIDIA RTX 3090, A40 and H100.
+# GraphMend CGO 2027 artifact: the image, for all three claims.
+#
+#   docker build -f artifact/Dockerfile -t graphmend .
+#   docker run --gpus all graphmend         # C1 then C2
+#   docker run --gpus all graphmend c1      # C1 only
+#   docker run --gpus all graphmend c2      # C2 only
+#   docker run --gpus all graphmend c3      # C3, the 10-row sample
+#
+# One image rather than two. C1 and C2 do not need a GPU and run here without
+# one -- the assertion below checks the wheel, not a visible device -- but a
+# CPU-only image cannot carry xformers, without which stella-en-400M-v5 takes
+# a fallback path and measures a different row, and it cannot run C3 at all.
+# The cost is size, which is the right trade for one build and one archive.
 #
 # ============================================================================
 # BUILT AND GPU-VERIFIED. This image builds, reaches a physical GPU, and runs
@@ -57,10 +66,11 @@
 # [[gpu]]`; use the device passthrough above instead, which needs no toolkit
 # and no root.
 #
-# The break-elimination and correctness claims do not need a GPU at all. Use
-# artifact/Dockerfile.cpu for those; it is smaller and needs no device setup.
+# C1 and C2 need no GPU. Run them without `--gpus all` and they measure the
+# same numbers, except stella-en-400M-v5, whose unpadding path requires a
+# visible device.
 
-# Same interpreter as the CPU image, and for a reason that is not cosmetic.
+# The interpreter is pinned, for a reason that is not cosmetic.
 # The obvious base here is nvidia/cuda:*-runtime-ubuntu24.04, but Ubuntu 24.04
 # ships Python 3.12 as python3, and the Jac toolchain's from-source path is
 # exercised on 3.13. Picking the base image's interpreter would put the
@@ -140,7 +150,7 @@ assert torch.version.cuda is not None, 'expected a CUDA wheel, got the CPU build
 # submodule plus patches/graphmend.patch. Copy the submodule checkout, the
 # patch, the harness and the artifact package, then let setup.sh assemble them.
 # The build context must therefore be a clone with submodules initialised:
-#   git clone --recurse-submodules <url> && docker build -f artifact/Dockerfile.cpu .
+#   git clone --recurse-submodules <url> && docker build -f artifact/Dockerfile .
 COPY jac.toml   /opt/artifact/jac.toml
 COPY jaseci     /opt/artifact/jaseci
 COPY patches    /opt/artifact/patches
@@ -150,10 +160,11 @@ COPY artifact   /opt/artifact/artifact
 
 ENV PYTHONPATH=/opt/artifact/jaseci/jac:/opt/artifact
 
-# Both steps are explained at length in artifact/Dockerfile.cpu, which carries
-# the identical pair. In short: the typeshed stdlib stubs are gitignored and
-# must be materialized or no Jac compile works, and the warm-up is a real
-# `jac run` because it caches 162 modules where `--help` caches 31, and because
+# Two steps, both load-bearing. The typeshed stdlib stubs are gitignored, so a
+# fresh clone lacks them and every Jac compile fails at RUN time on type
+# inference; setup.sh materializes them, which is the only step needing network
+# and is checksum-pinned. The warm-up below is a real `jac run` rather than
+# `--help` because it caches 162 modules where `--help` caches 31, and because
 # it doubles as the build-time proof that the toolchain works in this image.
 # setup.sh applies patches/graphmend.patch into the submodule and fetches the
 # typeshed stubs. It verifies the submodule is at the pinned commit first, so a
@@ -175,4 +186,4 @@ WORKDIR /opt/artifact
 # works and `--count` reports break counts instead of timings. It prints
 # CUDA-graph launches per arm beside every number, which is the check that the
 # transform actually fired: identical launch counts mean it did not.
-ENTRYPOINT ["python", "/opt/artifact/artifact/gpu/bench.py"]
+ENTRYPOINT ["bash", "/opt/artifact/artifact/run.sh"]

@@ -113,7 +113,7 @@ mismatch flagged. The models are the 27 rows of Table~\ref{tab:benchmark}.
 \begin{verbatim}
 git clone --recurse-submodules {{REPO_URL}}
 cd CGO_AE_GraphMend
-docker build -f artifact/Dockerfile.cpu -t gm .
+docker build -f artifact/Dockerfile -t gm .
 docker run --rm gm
 \end{verbatim}
 
@@ -160,9 +160,18 @@ Each claim has one script, named for it.
     the transform and succeed after it on all 21 fully repaired rows. The check
     is asymmetric: a both-pass result is a failure. Partially repaired rows are
     excluded, since capture must fail for them either way.
-  \item \texttt{run\_latency.sh} $\rightarrow$ \textbf{C3},
-    Sections~\ref{sec:coldstart}--\ref{sec:steadystate}: breaks reach zero,
-    CUDA-graph launches per forward collapse to one, and cold start improves.
+  \item \texttt{run\_latency\_analysis.py} $\rightarrow$ \textbf{C3},
+    Sections~\ref{sec:coldstart}--\ref{sec:steadystate}. Two stages: a 10-row
+    sample by default, every row under \texttt{-{}-full}, at about four times
+    the cost. The sample is chosen for coverage, not speed: every rule fires,
+    every modality appears, and both ends of the agreement range are present.
+    Neither arm runs the compiler --- the fixed arm is stock transformers with
+    GraphMend's output copied in from \texttt{artifact/fixed\_models/} --- which
+    is the paper's methodology and is why an arm takes seconds. Expect cold
+    start in the single to low double digits, inversely related to batch size,
+    and steady state within a few percent of $1.0\times$. Gate the sources
+    first with \texttt{verify\_fixed.py}; regenerate them with
+    \texttt{gen\_fixed\_models.py} to check they are compiler output.
   \item \texttt{run\_throughput.sh} $\rightarrow$
     Figure~\ref{fig:throughput}: a gain that tracks the number of CUDA-graph
     launches eliminated and shrinks as the batch grows.
