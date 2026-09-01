@@ -222,23 +222,13 @@ def _auto_batch(model, inputs, torch, target=0.70):
         return None
 
 
-# The BART-family rows of Table 2, whose break count is DTYPE-GATED. The guard
-# at transformers/models/bart/modeling_bart.py:568 reads
-#
-#     if hidden_states.dtype == torch.float16 and (
-#         torch.isinf(hidden_states).any() or torch.isnan(hidden_states).any()):
-#
-# and the first conjunct is a static Python bool. In fp32 Dynamo folds it to
-# False and never reaches the data-dependent test, so the four DC breaks do not
-# exist at all: the same model measures 3 breaks in fp32 and 7 in fp16. The
-# reference scripts select fp16 whenever CUDA is present, which is what Table 2
-# counts, so these rows are built the same way here: real pretrained weights,
-# half precision on the device.
-#
-# paper_eval/registry.py keeps its fp32 small-config versions of these rows,
-# because the paper's correctness claim is that FP32 outputs are bit-identical
-# and that is the quantity `output_ok` checks. The two are measuring different
-# things on purpose.
+# The BART-family rows, whose break count is dtype-gated: the overflow guard at
+# modeling_bart.py:568 leads with `dtype == torch.float16`, a static bool that
+# Dynamo folds to False in fp32, so the data-dependent breaks do not exist
+# there. These rows are therefore built as the paper builds them -- real
+# pretrained weights, half precision on the device. paper_eval/registry.py
+# keeps fp32 small-config versions of the same rows, because the correctness
+# claim is about FP32 outputs.
 _BART_FAMILY = {
     "bart-base":      ("facebook/bart-base",        "BartForConditionalGeneration", 7),
     "bart-large-cnn": ("facebook/bart-large-cnn",   "BartForConditionalGeneration", 7),
@@ -531,26 +521,13 @@ def arm():
             print(f"# trace written: {_dest}")
         os.unlink(tf)
 
-        # Iteration boundaries. Region 0/N is the FIRST subgraph of an
-        # iteration, so consecutive 0/N markers delimit iterations. The paper's
-        # scripts match "0/0" exactly, which is right until a model RECOMPILES:
-        # Dynamo then issues a second code variant, later iterations arrive as
-        # 0/1, and a single 0/0 is left with no window at all. Matching any 0/N
-        # and ordering by time is the same measurement on a model that does not
-        # recompile and the correct one on a model that does. The variants seen
-        # are reported either way, so a recompile stays visible.
-        # Iteration boundaries, without assuming the first region is numbered 0.
-        # A region name is "Torch-Compiled Region: N/V", N indexing the compiled
-        # frame and V the code variant. The FIRST region of each iteration is
-        # the lowest N present, and its markers therefore delimit iterations.
-        #
-        # Two things force this to be computed rather than hardcoded. Phi-4-mini
-        # untransformed emits regions 1/0 through 8/0 and NO region 0 at all, so
-        # matching "0/0" finds nothing and the model looks unmeasurable. And a
-        # model that recompiles issues a second variant, so later iterations
-        # arrive as N/1 while N/0 occurs once; matching any variant of the
-        # lowest N keeps those iterations. Our cold_start_no_compile.py
-        # matches "0/0" literally, which is why it cannot measure this model.
+        # Iteration boundaries. A region is named "Torch-Compiled Region: N/V",
+        # N indexing the compiled frame and V the code variant. The first region
+        # of an iteration is the lowest N present, so its markers delimit
+        # iterations. Computed rather than hardcoded to 0/0: some models emit no
+        # region 0 at all, and a model that recompiles issues a second variant,
+        # so later iterations arrive as N/1. The variants seen are reported, so
+        # a recompile stays visible.
         _mark = {}
         for e in evs:
             if not isinstance(e, dict) or "ts" not in e:

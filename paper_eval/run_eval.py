@@ -117,6 +117,8 @@ def main(keys):
         err = off["error"] or on["error"]
         if err:
             rows.append((key, "-", "-", "-", "ERR", "-"))
+            print(f"ROW {key:28} {'-':>13} {'-':>12} {'-':>6} {'ERR':>9} "
+                  f"{'-':>12}", flush=True)
             print(f"  {key}: {err}", file=sys.stderr)
             continue
         b0, b1 = off["breaks"], on["breaks"]
@@ -132,6 +134,12 @@ def main(keys):
         tot_before += b0
         tot_after += b1
         rows.append((key, b0, b1, pct, correct, shape))
+        # Emit the row NOW as well as in the closing table. A sweep is tens of
+        # minutes warm and hours cold, and a caller that captures stdout sees
+        # nothing at all until the last model finishes -- which makes a working
+        # run indistinguishable from a hung one.
+        print(f"ROW {key:28} {b0:>13} {b1:>12} {pct:>6} {correct:>9} "
+              f"{shape:>12}", flush=True)
 
     print(f"\n{'model':28} {'breaks_before':>13} {'breaks_after':>12} "
           f"{'fixed':>6} {'output_ok':>9} {'input':>12}")

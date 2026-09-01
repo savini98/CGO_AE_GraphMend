@@ -1,16 +1,11 @@
-"""Where the toolchain and the harness live, resolved from this file.
+"""Locations of the toolchain and the harness.
 
-The harness runs each arm as a subprocess under `jac run`, so it has to hand
-that subprocess two directories on PYTHONPATH: the patched jaclang toolchain,
-and the artifact root, so that `import paper_eval.registry` resolves inside the
-arm.
+Each arm runs as a subprocess under `jac run` and needs two directories on
+PYTHONPATH: the patched jaclang toolchain, and the artifact root so that
+`paper_eval` imports inside the arm. Both are derived from this file's own
+location, so the harness runs from any working directory.
 
-Both are derived from this module's own location rather than from the working
-directory, so `python -m paper_eval.run_eval` works from the repository root,
-from this package, or from anywhere with the root on PYTHONPATH.
-
-GM_JACLANG_DIR overrides the toolchain location, for a reviewer who keeps the
-patched tree somewhere other than the submodule.
+GM_JACLANG_DIR overrides the toolchain location.
 """
 
 import os

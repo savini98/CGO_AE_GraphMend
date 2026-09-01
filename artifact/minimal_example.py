@@ -1,37 +1,18 @@
 """Smallest correct GraphMend measurement, as a template for your own script.
 
-RUN IT LIKE THIS, from THIS directory:
+Run it as:
 
     cd artifact
     PYTHONPATH=../jaseci/jac python -m jaclang run minimal_example.py
 
-Two things about that command line are load-bearing, and getting either wrong
-gives you a clean run that measures nothing at all:
+Two things about that command are required. It must be `python -m jaclang run`,
+not plain `python`: GraphMend injects the deferred-side-effect hooks at the
+`torch.compile(...)` assignment site, which only happens in a module Jac
+compiled. And it must run from this directory, whose jac.toml sets
+`graphmend_claim_imports = true`; without that opt-in imported model code is
+not claimed and both arms measure the same thing.
 
-  1. `python -m jaclang run`, NOT `python minimal_example.py`.
-     GraphMend injects the deferred-side-effect hooks at the
-     `torch.compile(...)` assignment site below. That is a source
-     transformation, so it only happens in a module Jac compiled. Under plain
-     CPython no forward pre-hook is registered, the side-effect depth stays at
-     zero, every deferred logger call runs inline, and every logger break
-     survives. The model code is genuinely transformed, so nothing looks wrong.
-
-  2. `cd artifact` first, because configuration resolves to the NEAREST
-     ANCESTOR jac.toml, and artifact/jac.toml is the one that sets
-     `graphmend_claim_imports = true`. Without that opt-in GraphMend does not
-     claim imported third-party code, transformers is untouched, and both arms
-     measure the same thing. Copy artifact/jac.toml next to your own script if
-     you work somewhere else.
-
-This file is a template for your own measurement script. The authoritative
-path is paper_eval/, which does the same thing for both arms and compares
-them; this one runs a single arm so that the two points above are visible in
-isolation.
-
-To see both arms by hand: run it once with artifact/jac.toml as shipped, then
-again with `graphmend_claim_imports = false`, and the break count moves from 0
-to 3 -- the same t5-small row the harness reports as 3 -> 0. If it does not
-move, one of the two points above is not satisfied.
+Expect 0 breaks as shipped, and 3 with `graphmend_claim_imports = false`.
 """
 
 import os

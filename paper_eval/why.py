@@ -1,16 +1,8 @@
-"""Print the REASON for each graph break in a registered model.
+"""Per-break cause reporting for one model, run under `jac run`.
 
-Table 2 attributes each model's breaks to a cause (DC / LC / VG / DS / DO / TI).
-A row that reads "N -> N, 0% fixed" is only meaningful once you know which of
-those causes the N breaks actually are: an unfixed logger break is a bug, an
-unfixed dynamic-shape break is the paper's declared out-of-scope category.
-
-Like entry.py, this must run under `jac run` for the "on" mode to mean
-anything -- under plain CPython the entry program is not Jac-compiled, so
-GraphMend never injects the deferred side-effect hooks and every [Defer]
-rewrite stays inert. Use the wrapper, which writes the right jac.toml per mode:
-
-    python -m paper_eval.run_why <model_key> [on|off]
+Prints each surviving graph break with the reason TorchDynamo gives and the
+source location, which is what distinguishes a row that is correctly unfixed
+from one that is not.
 """
 import os
 import sys

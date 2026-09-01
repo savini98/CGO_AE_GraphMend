@@ -1,49 +1,17 @@
-"""Report cold-start and steady-state latency from a PyTorch profiler trace.
+"""Cold-start and steady-state latency from a PyTorch profiler trace.
 
     python artifact/gpu/from_trace.py ORIGINAL.json FIXED.json
-    python artifact/gpu/from_trace.py --dir path/to/traces        # pair by name
+    python artifact/gpu/from_trace.py --dir DIR          # pair by name
 
-This is the analysis half of the GPU measurement. `bench.py --save-traces DIR`
-runs both arms and writes a trace pair per model into DIR; this script reads
-that pair and reports the numbers. Splitting them means the timing run and the
-arithmetic over it can be checked separately, and that a trace kept from an
-earlier run can be re-analysed without re-running the model:
+`bench.py --save-traces DIR` writes a trace pair per model; this reads them.
 
-    python artifact/gpu/bench.py --save-traces /tmp/gm-traces --runs 7 \
-        t5-small MoLFormer-XL-both10pct
-    python artifact/gpu/from_trace.py --dir /tmp/gm-traces
+A compiled region emits a `Torch-Compiled Region: N/M` marker each time it
+executes, so the interval between consecutive markers for the first region is
+one iteration: cold is the first interval, warm the median of the rest.
 
-THE METRIC. A compiled region emits a `Torch-Compiled Region: N/M` marker each
-time it executes. The interval between consecutive markers for the FIRST region
-is one iteration. So:
-
-    cold = the first such interval
-    warm = the median of the remaining intervals
-
-The first interval is where graph breaks show up. Compiling the first region
-happens before its marker is emitted, so it is excluded; what falls inside the
-first interval is everything the breaks force afterwards, which for a model
-with B breaks is the compilation and execution of the other B subgraphs. A
-fixed arm with one region has nothing left to do there, which is why its first
-interval is close to its steady state rather than close to the original's.
-
-WHICH TRACE, if you point this at traces from our own model scripts rather than
-at bench.py output. Those scripts write two different profiles per arm and the
-two do not agree:
-
-    profile_<arm>.json                  profile_small_batch(), no warmup
-    <model>_trace_<arm>_<stamp>.json    detect_cudagraphs(), after a warmup
-
-The paper's numbers are the second form. Reading the first instead understates
-the ratio by roughly 4x on MoLFormer-XL. This script prints the whole window
-sequence so the choice stays visible. Traces written by `bench.py
---save-traces` use the `_trace_` naming and need no such choice.
-
-WHAT TO EXPECT. Cold start and steady state both depend on the card, the driver
-and the batch size, so a run on a different GPU will not land on the paper's
-numbers and is not meant to. What is hardware-independent, and what
-`run_reproducible.sh` gates on, is the mechanism: graph breaks going to zero and
-the CUDA-graph launch count per forward collapsing to one.
+Magnitudes depend on the card, the driver and the batch size. What does not is
+the mechanism, which is what run_reproducible.sh gates on: breaks reaching zero
+and CUDA-graph launches per forward collapsing to one.
 """
 import argparse
 import gzip
