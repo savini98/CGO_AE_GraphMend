@@ -43,8 +43,8 @@ copy of a 4,700-file compiler tells a reviewer none of that.
 
 ```bash
 git clone --recurse-submodules <url> && cd CGO_AE_GraphMend
-docker build -f artifact/Dockerfile.cpu -t graphmend-cpu .   # ~5 min
-docker run --rm graphmend-cpu
+docker build -f artifact/Dockerfile -t graphmend .   # ~5 min
+docker run --rm graphmend
 ```
 
 `--recurse-submodules` matters: without it `jaseci/` is empty and the build
@@ -71,7 +71,7 @@ Expect `All checks passed.` and exit status 0: four rule-level suites
 The full 21-row offline sweep, which the default run does not include:
 
 ```bash
-docker run --rm --entrypoint bash graphmend-cpu \
+docker run --rm --entrypoint bash graphmend \
   -lc 'cd /opt/artifact && python -m paper_eval.run_eval'
 ```
 

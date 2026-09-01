@@ -13,7 +13,7 @@ and then dies on the first real compile with:
 
 which means `jac run` and `jac test` do not work, which means no model row and
 no rule suite can be measured. A fresh `git clone` of this repository hits that
-wall, and so did the first build of artifact/Dockerfile.cpu.
+wall, and so did the first build of artifact/Dockerfile.
 
 The repository's own answer is `zig build fetch-typeshed`, which drives the
 payload tool at jaclang/dist/payload/. That tool is itself written in Jac, and
