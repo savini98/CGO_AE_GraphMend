@@ -388,34 +388,40 @@ def _build_extra(key, device, torch):
             "context": torch.tensor(ctx, device=device)}
 
     if key == "Florence-2":
-        # Batch 4, from florence_2_large_script.py's BATCH_SIZE, not the 1 the
-        # generic default gives. At batch 1 the original arm compiles to a
-        # single CUDA graph, so there is no break for GraphMend to remove and
-        # the row measures overhead against nothing.
-        repo = "microsoft/Florence-2-large"
-        proc = transformers.AutoProcessor.from_pretrained(
-            repo, trust_remote_code=True)
+        # registry._florence2, followed exactly. Partial alignment is not enough:
+        # with Florence-2-large and pretrained weights the row traces to ONE
+        # graph and zero breaks even though every dtype is right (params fp16,
+        # hidden_states fp16 into Florence2EncoderLayer), so the fp16 overflow
+        # guard never becomes a break and both arms are identical.
+        #
+        # The registry uses the BASE repo, shrinks the language stack to one
+        # encoder and one decoder layer, and builds from config rather than
+        # loading pretrained weights. Its docstring records that the count does
+        # not move with layer depth, so the shrink costs nothing; what matters
+        # is that this is the same model Claim 1 verifies at 7 breaks, so the
+        # timed row and the counted row are the same thing.
+        from transformers.dynamic_module_utils import get_class_from_dynamic_module
+
+        repo = "microsoft/Florence-2-base"
+        rev = "5ca5edf5bd017b9919c05d08aebef5e4c7ac3bac"
         cfg = transformers.AutoConfig.from_pretrained(
-            repo, trust_remote_code=True)
-        cls = transformers.AutoModelForCausalLM
-        m = _load_weights(cls.from_config(cfg, trust_remote_code=True), repo)
-        if device == "cuda":
-            m = m.half()
-        b, _ = _bs(4, 128)
-        inputs = proc(text=["<CAPTION>"] * b, images=[_dummy_image()] * b,
-                      return_tensors="pt")
-        out = _to_device(inputs, device, torch)
-        if device == "cuda" and "pixel_values" in out:
-            out["pixel_values"] = out["pixel_values"].half()
-        # Florence-2 wraps a BART-style encoder-decoder, so a forward with no
-        # decoder_input_ids raises rather than starting generation. One BOS,
-        # same single-token decoder start the other seq2seq rows use.
-        tcfg = getattr(cfg, "text_config", cfg)
-        bos = (getattr(tcfg, "decoder_start_token_id", None)
-               or getattr(tcfg, "bos_token_id", None) or 2)
-        out["decoder_input_ids"] = torch.full(
-            (b, 1), int(bos), dtype=torch.long, device=device)
-        return m.to(device).eval(), out
+            repo, trust_remote_code=True, revision=rev)
+        cfg.text_config.encoder_layers = 1
+        cfg.text_config.decoder_layers = 1
+        cls = get_class_from_dynamic_module(
+            "modeling_florence2.Florence2ForConditionalGeneration", repo,
+            revision=rev)
+        m = cls(cfg).half()
+        # image_projection is zero-filled by the constructor; the registry seeds
+        # it so the vision features reaching the encoder are not identically 0.
+        with torch.no_grad():
+            torch.nn.init.normal_(m.image_projection, mean=0.0, std=0.02)
+        b, s_len = _bs(1, 8)
+        return m.to(device).eval(), {
+            "input_ids": torch.randint(0, 100, (b, s_len), device=device),
+            "decoder_input_ids": torch.randint(0, 100, (b, s_len), device=device),
+            "pixel_values": torch.randn(b, 3, 224, 224, device=device).half(),
+        }
 
     if key == "Qwen-Audio-Chat":
         from transformers.dynamic_module_utils import get_class_from_dynamic_module

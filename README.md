@@ -132,8 +132,7 @@ Stated here rather than left for a reviewer to discover:
 |---|---|
 | [`artifact/`](artifact/) | The artifact-evaluation package: guide, results, appendix, Dockerfiles, one-command runner |
 | [`artifact/gpu/run_reproducible.sh`](artifact/gpu/run_reproducible.sh) | The GPU claims that reproduce, with expected values and a real exit status |
-| [`artifact/gpu/from_trace.py`](artifact/gpu/from_trace.py) | Re-derives the published cold and steady-state numbers from the shipped profiler traces. No GPU needed |
-| [`artifact/traces/3090/`](artifact/traces/3090/) | The 24 profiler trace pairs the paper's latency numbers were read from |
+| [`artifact/gpu/from_trace.py`](artifact/gpu/from_trace.py) | Re-derives cold and steady-state numbers from a profiler trace pair you generated. No GPU needed |
 | [`jac/`](jac/) | The vendored jaclang toolchain, including the GraphMend passes |
 | [`jac/paper_eval/`](jac/paper_eval/) | The reproduction harness: per-model builders, the two-arm runner, the measurement entry program |
 | [`jac/tests/compiler/passes/`](jac/tests/compiler/passes/) | The rule-level graph-count suites |

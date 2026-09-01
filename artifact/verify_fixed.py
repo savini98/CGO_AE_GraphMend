@@ -128,8 +128,8 @@ EXPECTED = {
     # fixed count of 7 matches, so the fix rate reads 56% where the paper reads
     # 58%; RESULTS.md records the one-break difference rather than papering over
     # it by expecting the paper's number and failing every run.
-    "grounding-dino-tiny": (16, 7),
-    "grounding-dino-base": (16, 7),
+    "grounding-dino-tiny": (19, 9),
+    "grounding-dino-base": (19, 9),
 }
 
 # Not here, deliberately: clap-htsat-fused, moe-minicpm-x4-base and

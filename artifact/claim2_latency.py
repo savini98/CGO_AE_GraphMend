@@ -109,6 +109,27 @@ SOURCES = {
 # 1089/1270, t5-base 350/407, t5-3b 20/54, it5 105/188). A ratio across unequal
 # batches compares unequal work. The original arm's batch is the one taken here,
 # because that is the size the unmodified model was measured at.
+
+# A 10-row subset for reviewers who do not want to spend an hour on the full
+# sweep. Chosen for coverage rather than speed alone: every rule fires at least
+# once ([Trap] on MoLFormer and grounding-dino-base, [Where] on Phi-4-mini and
+# Qwen-Audio-Chat, [Defer] on the rest), every input modality appears (text,
+# speech, vision, time series), and both ends of the agreement range are here:
+# bart-large-cnn and rebel-large land near Table 2, grounding-dino-base and
+# MoLFormer are the two furthest from it.
+QUICK_ROWS = [
+    "rebel-large",
+    "bart-large-cnn",
+    "opus-mt-fr-en",
+    "t5-small",
+    "MoLFormer-XL-both10pct",
+    "whisper-base",
+    "chronos-bolt-small",
+    "grounding-dino-base",
+    "Qwen-Audio-Chat",
+    "Phi-4-mini-instruct",
+]
+
 PAPER_BATCH = {
     "t5-small": 1345,
     "bart-base": 811,
@@ -153,6 +174,29 @@ if __jac_se_region_open__ is not None:
 '''
 
 
+
+def apply_row_sources(dest_root, fixed_models, row):
+    """Re-assert one row's fixed sources over the shared tree.
+
+    Returns the basenames written. Rows sharing a filename (ten ship
+    modeling_utils.py, in four different versions) would otherwise run whichever
+    copy was written last, which is a silent wrong-model measurement rather than
+    an error.
+    """
+    dest = os.path.join(dest_root, "transformers")
+    written = []
+    for srcdir in SOURCES.get(row, []):
+        d = os.path.join(fixed_models, srcdir)
+        for fixed in sorted(glob.glob(os.path.join(d, "*.graphmend.py"))):
+            base = os.path.basename(fixed)[:-len(".graphmend.py")]
+            hits = [p for p in glob.glob(os.path.join(dest, "**", base + ".py"),
+                                         recursive=True)]
+            if hits:
+                shutil.copyfile(fixed, hits[0])
+                written.append(base)
+    return written
+
+
 def build_fixed_tree(fixed_models, rows, workdir, python):
     """A transformers tree with GraphMend's output copied over the originals.
 
@@ -193,7 +237,15 @@ def build_fixed_tree(fixed_models, rows, workdir, python):
     # leaves those rows running the stock model in BOTH arms -- the signature
     # is identical launch counts, which the caller fails on. Copy and redirect
     # rather than edit, so the original arm and the real cache stay untouched.
-    mod_cache = os.path.expanduser("~/.cache/huggingface/modules")
+    # Resolve the modules cache the way transformers does, not from ~. In a
+    # container HF_HOME is set (/hf here) while ~ is /root, so a hardcoded
+    # ~/.cache/huggingface/modules names a directory that does not exist: the
+    # copy silently finds nothing, the Hub rows keep their unpatched code, and
+    # MoLFormer fails the launch gate at 50 -> 50 as if the transform had done
+    # nothing. Florence-2 and Qwen-Audio-Chat load the same way.
+    _hf_home = os.environ.get("HF_HOME") or os.path.expanduser("~/.cache/huggingface")
+    mod_cache = (os.environ.get("HF_MODULES_CACHE")
+                 or os.path.join(_hf_home, "modules"))
     mod_copy = os.path.join(workdir, "hf_modules")
     if os.path.isdir(mod_cache):
         if not os.path.isdir(mod_copy):
@@ -264,15 +316,22 @@ def main():
     ap.add_argument("models", nargs="*")
     ap.add_argument("--fixed-models", default=os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "fixed_models"))
-    ap.add_argument("--python", default=sys.executable)
-    ap.add_argument("--runs", default="7",
-                    help="forward passes per arm; 7 matches the reference traces")
+    ap.add_argument("--runs", default="10",
+                    help="forward passes per arm (default 10): the first is cold, "
+                         "the rest are medianed for steady state")
+    ap.add_argument("--repeat", type=int, default=5,
+                    help="independent measurements per row (default 5); cold "
+                         "start is one sample per measurement, so repeats are "
+                         "what average it")
     ap.add_argument("--list", action="store_true")
+    ap.add_argument("--quick", action="store_true",
+                    help="the 10-row subset in QUICK_ROWS, about a "
+                         "quarter of the time of the full sweep")
     o = ap.parse_args()
 
     here = os.path.dirname(os.path.abspath(__file__))
     bench = os.path.join(here, "gpu", "bench.py")
-    rows = o.models or list(TABLE2)
+    rows = o.models or (QUICK_ROWS if o.quick else list(TABLE2))
     rows = [r for r in rows if r in TABLE2]
 
     have = {r for r in rows
@@ -288,7 +347,7 @@ def main():
 
     work = tempfile.mkdtemp(prefix="claim2_")
     fixed_path, applied, defer_only, hfmod = build_fixed_tree(
-        o.fixed_models, sorted(have), work, o.python)
+        o.fixed_models, sorted(have), work, sys.executable)
     print(f"fixed sources applied: {len(applied)}")
     for srcdir, base in applied:
         print(f"    {srcdir}/{base}")
@@ -304,14 +363,25 @@ def main():
             continue
         tdir = os.path.join(work, key)
         os.makedirs(tdir, exist_ok=True)
-        try:
-            off = run_arm(bench, o.python, key, False, tdir, None, o.runs)
-            on = run_arm(bench, o.python, key, True, tdir, fixed_path, o.runs,
-                         hfmod)
-        except RuntimeError as exc:
-            print(f"{key:28s} FAIL ({exc})")
+        reps, failed = [], None
+        for _rep in range(max(1, o.repeat)):
+            try:
+                off = run_arm(bench, sys.executable, key, False, tdir, None,
+                              o.runs)
+                # The shared tree may hold another row's copy of a same-named
+                # module by now, so re-assert this row's own sources first.
+                apply_row_sources(fixed_path, o.fixed_models, key)
+                on = run_arm(bench, sys.executable, key, True, tdir, fixed_path,
+                             o.runs, hfmod)
+            except RuntimeError as exc:
+                failed = str(exc)
+                break
+            reps.append((off, on))
+        if failed is not None:
+            print(f"{key:28s} FAIL ({failed})")
             bad += 1
             continue
+        off, on = reps[-1]
 
         if os.environ.get("GM_DEBUG_ARMS"):
             print(f"  RAW {key} stock {json.dumps(off, sort_keys=True)}")
@@ -337,20 +407,30 @@ def main():
             # the `old_speedup` it meant to replace. The raw window IS the
             # published metric. Using cold_ms here would silently diverge on any
             # torch that does emit backend_compile.
-            cold = off["cold_window_ms"] / on["cold_window_ms"]
-            warm = off["warm_ms"] / on["warm_ms"]
+            # Ratio per measurement, then averaged. Averaging the two arms'
+            # times separately would mix machine conditions across runs; the
+            # pairing inside one measurement is what cancels them.
+            colds = [a["cold_window_ms"] / b["cold_window_ms"] for a, b in reps]
+            warms = [a["warm_ms"] / b["warm_ms"] for a, b in reps]
+            cold = sum(colds) / len(colds)
+            warm = sum(warms) / len(warms)
         except (KeyError, ZeroDivisionError):
             print(f"{key:28s} FAIL (incomplete timing)")
             bad += 1
             continue
-        results.append((key, cold, warm, lo, ln))
+        spread = ((max(colds) - min(colds)) / cold * 100) if len(colds) > 1 else 0.0
+        results.append((key, cold, warm, lo, ln, spread, len(colds)))
 
     print()
     print(f"{'model':32s} {'cold':>10s} {'steady state':>14s}")
     print("-" * 60)
-    for key, cold, warm, lo, ln in results:
+    for key, cold, warm, lo, ln, _sp, _n in results:
         print(f"{key:32s} {cold:9.2f}x {warm:13.3f}x")
     print("-" * 60)
+    if results and results[0][6] > 1:
+        worst = max(results, key=lambda r: r[5])
+        print(f"each value is the mean of {results[0][6]} measurements; "
+              f"widest cold spread {worst[5]:.0f}% on {worst[0]}")
     print(f"{len(results)} row(s) measured on this GPU, from traces this run")
     print("produced. Expect cold start in the single to low double digits")
     print("(inversely related to batch) and steady state near 1.0x.")
