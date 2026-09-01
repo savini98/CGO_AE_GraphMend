@@ -169,7 +169,7 @@ python artifact/verify_fixed.py        # check they remove the same breaks
 
 ## Known differences from the paper
 
-The runs print their own counts. Read them against the paper's Table 2. Four
+The runs print their own counts. Read them against the paper's Table 2. Three
 differences are expected, so that a reviewer does not read one as a failure:
 
 - **The CPU sweep runs in fp32**, so some absolute break counts are lower than
@@ -179,8 +179,6 @@ differences are expected, so that a reviewer does not read one as a failure:
   What survives is the paper's declared out-of-scope category. A clean sweep on
   any of them would be the anomaly. `run_why` shows which category a surviving
   break falls into.
-- **grounding-dino reads one break lower** than Table 2, out of seventeen. It
-  is the only row whose fix percentage differs.
 - **stella needs CUDA with xformers** to reproduce its row, because its breaks
   live behind the unpadding path. Elsewhere it measures a different, smaller
   break set.
