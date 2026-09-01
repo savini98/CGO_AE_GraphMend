@@ -19,6 +19,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -65,11 +66,29 @@ def _run(key: str, mode: str, state: str = "") -> dict:
                    PAPER_EVAL_DIR=_paths.ARTIFACT_ROOT, GM_MODEL=key)
         if state:
             env["GM_STATE"] = state
-        p = subprocess.run(
+        # A hung arm has to fail with a reason rather than stall the sweep in
+        # silence. start_new_session puts the arm in its own process group so
+        # the compiler child dies with it; killing only the direct child leaves
+        # it running and holding the memory.
+        limit = float(os.environ.get("GM_ARM_TIMEOUT", "5400"))
+        proc = subprocess.Popen(
             [sys.executable, "-m", "jaclang", "run", "entry.py"],
-            capture_output=True, text=True, env=env, cwd=workdir,
-        )
-        for line in reversed(p.stdout.strip().splitlines()):
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            env=env, cwd=workdir, start_new_session=True)
+        try:
+            out, errtxt = proc.communicate(timeout=limit)
+            rc = proc.returncode
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except Exception:
+                proc.kill()
+            proc.communicate()
+            return {"key": key, "mode": mode, "graphs": None, "breaks": None,
+                    "out_hash": None, "in_shape": None,
+                    "error": f"timed out after {int(limit)}s with GraphMend "
+                             f"{mode}. Raise GM_ARM_TIMEOUT to allow longer."}
+        for line in reversed(out.strip().splitlines()):
             if line.startswith("GMRESULT "):
                 row = json.loads(line[len("GMRESULT "):])
                 row["mode"] = mode
@@ -80,11 +99,11 @@ def _run(key: str, mode: str, state: str = "") -> dict:
         # SIGKILLed arm writes no traceback at all: the OOM killer takes the
         # process while GraphMend is compiling the imported modeling code, and
         # the row then reports ERR for what is really a memory ceiling.
-        err = (p.stderr.strip() or p.stdout.strip())
+        err = (errtxt.strip() or out.strip())
         head = ""
-        if p.returncode in (-9, 137):
-            head = (f"killed by SIGKILL (exit {p.returncode}), almost certainly "
-                    "out of memory: give Docker at least 10 GB, see the "
+        if rc in (-9, 137):
+            head = (f"killed by SIGKILL (exit {rc}), almost certainly "
+                    "out of memory: give Docker at least 20 GB, see the "
                     "troubleshooting section of artifact/README.md")
         else:
             head = next(
@@ -95,7 +114,7 @@ def _run(key: str, mode: str, state: str = "") -> dict:
         return {"key": key, "mode": mode, "graphs": None, "breaks": None,
                 "out_hash": None, "in_shape": None,
                 "error": (head + " || " if head else "")
-                         + (tail or f"no GMRESULT (exit {p.returncode})")}
+                         + (tail or f"no GMRESULT (exit {rc})")}
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 
