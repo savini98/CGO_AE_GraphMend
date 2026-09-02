@@ -44,7 +44,7 @@ can be run without a build and without fetching anything:
 
 ```bash
 docker load < graphmend-image.tar.gz
-docker run --rm --gpus all --memory=20g graphmend:cgo2027 c1 t5-small
+docker run --rm --gpus all --memory=20g graphmend c1 t5-small
 ```
 
 It is the same image the Dockerfile produces. Loading it skips the build and

@@ -41,7 +41,7 @@ without a build:
 
 ```bash
 docker load < graphmend-image.tar.gz
-docker run --rm --gpus all --memory=20g graphmend:cgo2027 c1 t5-small
+docker run --rm --gpus all --memory=20g graphmend c1 t5-small
 ```
 
 If the repository was cloned without submodules:
