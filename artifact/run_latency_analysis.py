@@ -403,8 +403,9 @@ def main():
     fixed_path, applied, defer_only, hfmod = build_fixed_tree(
         o.fixed_models, sorted(have), work, sys.executable)
     print(f"fixed sources applied: {len(applied)}")
-    for srcdir, base in applied:
-        print(f"    {srcdir}/{base}")
+    if os.environ.get("GM_VERBOSE"):
+        for srcdir, base in applied:
+            print(f"    {srcdir}/{base}")
     if defer_only:
         print(f"  [Defer]-only files present ({', '.join(sorted(set(defer_only)))});"
               f" the hook shim is active for the fixed arm")
@@ -445,8 +446,9 @@ def main():
                 _hfmod, _hub = hub_copy(o.fixed_models, [key], work)
                 if _hfmod:
                     hfmod = _hfmod
-                    for _srcdir, _base in _hub:
-                        print(f"    {_srcdir}/{_base}", flush=True)
+                    if os.environ.get("GM_VERBOSE"):
+                        for _srcdir, _base in _hub:
+                            print(f"    {_srcdir}/{_base}", flush=True)
                 on = run_arm(bench, sys.executable, key, True, tdir, fixed_path,
                              o.runs, hfmod)
             except RuntimeError as exc:
@@ -499,16 +501,21 @@ def main():
         # Report the row as it lands. The table below is only printed once every
         # row is done, and a ten-row run is long enough that a reviewer watching
         # it should not have to wait for the first number.
-        batch = off.get("auto_batch") or off.get("in_shape")
-        print(f"ROW {key:28s} cold {cold:6.2f}x  steady {warm:6.3f}x  "
-              f"launches {lo} -> {ln}  batch {batch}", flush=True)
+        if not results[:-1]:
+            print(f"ROW {'model':28s} {'cold':>8s} {'steady':>9s} "
+                  f"{'launches':>14s}", flush=True)
+            print(f"    {'-' * 62}", flush=True)
+        print(f"ROW {key:28s} {cold:7.2f}x {warm:8.3f}x "
+              f"{str(lo) + ' -> ' + str(ln):>14s}", flush=True)
 
     print()
-    print(f"{'model':32s} {'cold':>10s} {'steady state':>14s}")
-    print("-" * 60)
+    print(f"{'model':32s} {'cold':>10s} {'steady state':>14s} "
+          f"{'launches':>14s}")
+    print("-" * 75)
     for key, cold, warm, lo, ln, _sp, _n in results:
-        print(f"{key:32s} {cold:9.2f}x {warm:13.3f}x")
-    print("-" * 60)
+        print(f"{key:32s} {cold:9.2f}x {warm:13.3f}x "
+              f"{str(lo) + ' -> ' + str(ln):>14s}")
+    print("-" * 75)
     if results and results[0][6] > 1:
         worst = max(results, key=lambda r: r[5])
         print(f"each value is the mean of {results[0][6]} measurements; "
