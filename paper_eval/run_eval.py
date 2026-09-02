@@ -127,6 +127,12 @@ RUN_LAST = ("chronos-bolt-small",)
 def main(keys):
     rows = []
     tot_before = tot_after = 0
+    # Name the columns before the rows start arriving. The rows stream one at a
+    # time and the consolidated table only prints at the end, so without this a
+    # reviewer is reading six unlabelled values for the length of the run.
+    print(f"ROW {'model':28} {'breaks':>8} {'after':>8} {'fixed':>7} "
+          f"{'output':>10}", flush=True)
+    print(f"    {'-' * 65}", flush=True)
     # Stable: the heavy rows move to the end, everything else keeps its order.
     keys = sorted(keys, key=lambda k: k in RUN_LAST)
     for key in keys:
@@ -143,8 +149,8 @@ def main(keys):
         err = off["error"] or on["error"]
         if err:
             rows.append((key, "-", "-", "-", "ERR", "-"))
-            print(f"ROW {key:28} {'-':>13} {'-':>12} {'-':>6} {'ERR':>9} "
-                  f"{'-':>12}", flush=True)
+            print(f"ROW {key:28} {'-':>8} {'-':>8} {'-':>7} {'ERR':>10}",
+                  flush=True)
             print(f"  {key}: {err}", file=sys.stderr)
             continue
         b0, b1 = off["breaks"], on["breaks"]
@@ -156,7 +162,12 @@ def main(keys):
         s0, s1 = off.get("in_shape"), on.get("in_shape")
         shape = "x".join(str(d) for d in (s0 or [])) or "-"
         if s0 != s1:
+            # The comparison only means something if both arms saw the same
+            # input, so say so loudly rather than leaving it to be noticed in a
+            # column.
             shape += " MISMATCH"
+            print(f"    {key}: INPUT SHAPE MISMATCH, {s0} against {s1} -- the "
+                  f"two arms did not compare the same work", flush=True)
         tot_before += b0
         tot_after += b1
         rows.append((key, b0, b1, pct, correct, shape))
@@ -164,8 +175,8 @@ def main(keys):
         # minutes warm and hours cold, and a caller that captures stdout sees
         # nothing at all until the last model finishes -- which makes a working
         # run indistinguishable from a hung one.
-        print(f"ROW {key:28} {b0:>13} {b1:>12} {pct:>6} {correct:>9} "
-              f"{shape:>12}", flush=True)
+        print(f"ROW {key:28} {b0:>8} {b1:>8} {pct:>7} {correct:>10}",
+              flush=True)
 
     # Driven by verify_break_elimination.py, which prints one consolidated
     # table over every row at the end. Printing a second one here just repeats
