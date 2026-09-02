@@ -99,7 +99,12 @@ def _stream(cmd, cwd, env, label):
         # front of a reviewer, between the rows and the table.
         if line.lstrip().startswith("{"):
             continue
-        print(line if line.startswith("ROW ") else f"  | {line}", flush=True)
+        # ROW marks a result line for the parser above; strip it on the way
+        # out so a reviewer reads the row, not the marker.
+        if line.startswith("ROW "):
+            print(line[4:], flush=True)
+        else:
+            print(f"  | {line}", flush=True)
     p.wait()
     return lines, p.returncode
 

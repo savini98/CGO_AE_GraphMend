@@ -502,10 +502,10 @@ def main():
         # row is done, and a ten-row run is long enough that a reviewer watching
         # it should not have to wait for the first number.
         if not results[:-1]:
-            print(f"ROW {'model':28s} {'cold':>8s} {'steady':>9s} "
+            print(f"{'model':32s} {'cold':>8s} {'steady':>9s} "
                   f"{'launches':>14s}", flush=True)
-            print(f"    {'-' * 62}", flush=True)
-        print(f"ROW {key:28s} {cold:7.2f}x {warm:8.3f}x "
+            print(f"{'-' * 66}", flush=True)
+        print(f"{key:32s} {cold:7.2f}x {warm:8.3f}x "
               f"{str(lo) + ' -> ' + str(ln):>14s}", flush=True)
 
     print()
