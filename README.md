@@ -7,11 +7,11 @@ graph breaks while preserving model behavior.
 
 ## What this artifact validates
 
-| Claim | What is reproduced |
-|---|---|
-| **C1** | GraphMend removes fixable graph breaks while preserving model behavior. |
-| **C2** | Fully fixed models can be captured with `torch.compile(fullgraph=True)`. |
-| **C3** | Removing graph breaks improves downstream PyTorch/CUDA execution. |
+| Claim | What is reproduced | Paper |
+|---|---|---|
+| **C1** | GraphMend fixes graph breaks while preserving the outputs of the original model. | §5.1, Table 2 |
+| **C2** | Models for which GraphMend eliminates all graph breaks can be captured using `torch.compile(fullgraph=True)`, a prerequisite for serving frameworks that rely on full-graph capture. | §5.6 |
+| **C3** | Fixing graph breaks improves PyTorch 2 execution performance by reducing cold-start and steady-state forward-pass latency. | §5.2-5.4, Table 2 |
 
 C1 and C2 can be run on CPU or GPU. C3 requires an NVIDIA GPU.
 
