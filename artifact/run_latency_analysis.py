@@ -352,8 +352,19 @@ def run_arm(bench, python, key, on, trace_dir, extra_path, runs, hf_modules=None
     icache = os.path.join(trace_dir, "inductor_" + ("on" if on else "off"))
     os.makedirs(icache, exist_ok=True)
     env["TORCHINDUCTOR_CACHE_DIR"] = icache
+    # Run from a directory whose jac.toml turns claiming OFF. jac resolves
+    # configuration to the nearest ancestor and does not merge, so an arm left
+    # in the repository root picks up its `graphmend_claim_imports = true`: the
+    # shim's `import jaclang` then installs the import hook, every transformers
+    # module the arm imports is claimed and recompiled, and the arm this script
+    # describes as plain CPython is running the compiler after all -- on top of
+    # the fixed sources it was handed.
+    armdir = os.path.join(trace_dir, "arm")
+    os.makedirs(armdir, exist_ok=True)
+    with open(os.path.join(armdir, "jac.toml"), "w") as fh:
+        fh.write("[run]\ngraphmend = false\ngraphmend_claim_imports = false\n")
     p = subprocess.run([python, bench], capture_output=True, text=True,
-                       env=env, check=False)
+                       env=env, check=False, cwd=armdir)
     for line in p.stdout.splitlines():
         if line.startswith("GMBENCH10 "):
             return json.loads(line[len("GMBENCH10 "):])
