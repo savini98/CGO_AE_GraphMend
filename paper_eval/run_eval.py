@@ -167,6 +167,12 @@ def main(keys):
         print(f"ROW {key:28} {b0:>13} {b1:>12} {pct:>6} {correct:>9} "
               f"{shape:>12}", flush=True)
 
+    # Driven by verify_break_elimination.py, which prints one consolidated
+    # table over every row at the end. Printing a second one here just repeats
+    # 21 of those rows in a different format.
+    if os.environ.get("GM_NO_SUMMARY"):
+        return 0 if not any(r[4] == "NO" for r in rows) else 1
+
     print(f"\n{'model':28} {'breaks_before':>13} {'breaks_after':>12} "
           f"{'fixed':>6} {'output_ok':>9} {'input':>12}")
     print("-" * 85)

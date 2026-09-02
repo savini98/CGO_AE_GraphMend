@@ -94,6 +94,11 @@ def _stream(cmd, cwd, env, label):
         lines.append(line)
         # ROW lines are the per-model results; show them plainly and prefix the
         # rest so the child's chatter is distinguishable from our own output.
+        # The child also emits a machine-readable JSON object for the parent to
+        # parse. Echoing it puts several hundred characters of one-line JSON in
+        # front of a reviewer, between the rows and the table.
+        if line.lstrip().startswith("{"):
+            continue
         print(line if line.startswith("ROW ") else f"  | {line}", flush=True)
     p.wait()
     return lines, p.returncode
@@ -108,7 +113,8 @@ def run_small(keys, jac):
         return {}
     # PYTHONUNBUFFERED: stdout here is a pipe, so without it Python
     # block-buffers and a long run emits nothing until it exits.
-    env = dict(os.environ, PYTHONPATH=jac, PYTHONUNBUFFERED="1")
+    env = dict(os.environ, PYTHONPATH=jac, PYTHONUNBUFFERED="1",
+               GM_NO_SUMMARY="1")
     lines, rc = _stream([sys.executable, "-m", "paper_eval.run_eval", *keys],
                         jac, env, "paper_eval.run_eval")
     out = {}
