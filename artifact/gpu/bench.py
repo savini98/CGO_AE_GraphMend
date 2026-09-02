@@ -219,7 +219,11 @@ def _auto_batch(model, inputs, torch, key, target=0.70):
         if available <= 0:
             return None
         bs = int(available / (per_sample * mult))
-        bs = max(1, min(bs, 2048))
+        # The cap is a guard against a runaway estimate, not a sizing rule:
+        # at 2048 it binds well before 70% on a large card and silently caps
+        # the fill. The verify loop below halves on a real allocation, so the
+        # ceiling only has to stop something absurd.
+        bs = max(1, min(bs, int(os.environ.get("GM_BENCH10_BATCH_CAP", "65536"))))
         print(f"# auto-batch: model {model_gb:.2f} GB, per-sample "
               f"{per_sample / 1024:.1f} KB, multiplier {mult:.0f}x, "
               f"target {target:.0%} of {total / 1024 ** 3:.1f} GB total / "
