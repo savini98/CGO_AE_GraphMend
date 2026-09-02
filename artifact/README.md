@@ -37,19 +37,6 @@ docker build -f artifact/Dockerfile -t graphmend .
 `--recurse-submodules` matters. Without it `jaseci/` is empty and the build
 fails. On an existing clone, run `git submodule update --init`.
 
-### Docker without building
-
-The Zenodo deposit carries the built image alongside the source, so the claims
-can be run without a build and without fetching anything:
-
-```bash
-docker load < graphmend-image.tar.gz
-docker run --rm --gpus all --memory=20g graphmend c1 t5-small
-```
-
-It is the same image the Dockerfile produces. Loading it skips the build and
-does not need the package indexes to still be serving the pinned versions.
-
 ### Without Docker
 
 ```bash
