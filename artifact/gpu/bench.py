@@ -203,9 +203,18 @@ def _auto_batch(model, inputs, torch, key, target=0.70):
 
         per_sample = max((peak - baseline) / max(probe_b, 1), 1024)
         model_gb = baseline / (1024 ** 3)
-        mult = (80.0 if model_gb > 3.0 else
-                40.0 if model_gb > 1.0 else
-                30.0 if model_gb > 0.3 else 10.0)
+        # The inflation exists for generation, where a KV cache grows over the
+        # decode steps and a single-token probe cannot see it. The latency path
+        # runs one forward pass and grows nothing, so applying it there divides
+        # the budget by up to eighty and fills a few percent of the card
+        # instead of the 70% the paper sizes to. The verify loop below halves
+        # on a real allocation, so an estimate that is too large is caught.
+        if os.environ.get("GM_BENCH10_THROUGHPUT"):
+            mult = (80.0 if model_gb > 3.0 else
+                    40.0 if model_gb > 1.0 else
+                    30.0 if model_gb > 0.3 else 10.0)
+        else:
+            mult = 1.0
         available = min((total * target) - baseline, free_mem * target)
         if available <= 0:
             return None
