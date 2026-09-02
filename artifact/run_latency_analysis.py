@@ -92,11 +92,10 @@ SOURCES = {
 
 # A 10-row subset for reviewers who do not want to spend an hour on the full
 # sweep. Chosen for coverage rather than speed alone: every rule fires at least
-# once ([Trap] on MoLFormer and grounding-dino-base, [Where] on Phi-4-mini and
-# Qwen-Audio-Chat, [Defer] on the rest), every input modality appears (text,
-# speech, vision, time series), and both ends of the agreement range are here:
-# bart-large-cnn and rebel-large land near Table 2, grounding-dino-base and
-# MoLFormer are the two furthest from it.
+# once ([Trap] on MoLFormer, [Where] on Phi-4-mini and Qwen-Audio-Chat,
+# [Defer] on the rest), and every input modality appears -- text, speech,
+# document images, molecules and time series. Every row is one GraphMend
+# repairs completely, so each can reach a single CUDA-graph launch.
 QUICK_ROWS = [
     "rebel-large",
     "bart-large-cnn",
@@ -105,7 +104,7 @@ QUICK_ROWS = [
     "MoLFormer-XL-both10pct",
     "whisper-base",
     "chronos-bolt-small",
-    "grounding-dino-base",
+    "layoutlmv3-base",
     "Qwen-Audio-Chat",
     "Phi-4-mini-instruct",
 ]

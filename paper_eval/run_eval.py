@@ -132,7 +132,10 @@ def main(keys):
     # reviewer is reading six unlabelled values for the length of the run.
     print(f"ROW {'model':28} {'breaks':>8} {'after':>8} {'fixed':>7} "
           f"{'correctness':>13}", flush=True)
-    print(f"    {'-' * 68}", flush=True)
+    # ROW so the parent strips it like the rows; without the marker the parent
+    # treats it as child chatter and prefixes it, and the rule under the header
+    # comes out indented while the header does not.
+    print(f"ROW {'-' * 68}", flush=True)
     # Stable: the heavy rows move to the end, everything else keeps its order.
     keys = sorted(keys, key=lambda k: k in RUN_LAST)
     for key in keys:
