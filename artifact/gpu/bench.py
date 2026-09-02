@@ -58,6 +58,14 @@ paper's CUDA-graph setup.
 import argparse, json, os, shutil, statistics, subprocess, sys, tempfile
 from datetime import datetime
 
+# The harness owns the path layout; bench.py borrows it so the two cannot drift.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from paper_eval._paths import (  # noqa: E402
+    ARTIFACT_ROOT as _ARTIFACT_ROOT,
+    ARM_PYTHONPATH as _ARM_PYTHONPATH,
+    JACLANG_DIR as _JACLANG_DIR,
+)
+
 
 def _stamp_now():
     """Timestamp for saved trace filenames, matching the reference naming."""
@@ -75,7 +83,8 @@ PAPER_BATCH_3090 = {
     "t5-small": 1345,
     "MoLFormer-XL-both10pct": 837,
 }
-_TOML = "[run]\ngraphmend = {on}\ngraphmend_claim_imports = {on}\n"
+_TOML = ('[dev]\njaclang_source = "{src}"\n\n'
+         "[run]\ngraphmend = {on}\ngraphmend_claim_imports = {on}\n")
 
 
 def _load_weights(m, repo, rev=None, extra_ignorable=()):
@@ -933,9 +942,10 @@ def run(key, on, count):
     tcache = tempfile.mkdtemp(prefix="gmb10_triton_")
     try:
         open(os.path.join(wd, "jac.toml"), "w").write(
-            _TOML.format(on="true" if on else "false"))
+            _TOML.format(on="true" if on else "false", src=_JACLANG_DIR))
         shutil.copy(here, os.path.join(wd, "bench10.py"))
-        env = dict(os.environ, PYTHONPATH=repo, PAPER_EVAL_DIR=repo,
+        env = dict(os.environ, PYTHONPATH=_ARM_PYTHONPATH,
+                   PAPER_EVAL_DIR=_ARTIFACT_ROOT,
                    GM_MODEL=key, TORCHINDUCTOR_CACHE_DIR=icache,
                    TRITON_CACHE_DIR=tcache, **{ARM: "1"})
         # The arm learns which side it is from the environment rather than from
