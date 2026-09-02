@@ -148,7 +148,13 @@ def run_reference(keys, jac):
         except (ValueError, TypeError):
             continue
         for bench_key, r in data.items():
-            if bench_key in inv and not r.get("off", {}).get("error"):
+            # Both arms, not just the original. A failed transformed arm has
+            # no "breaks" key, so reading it below raised KeyError and took the
+            # whole run down with a traceback rather than reporting one row as
+            # ERR and carrying on to the rest.
+            if (bench_key in inv
+                    and not r.get("off", {}).get("error")
+                    and not r.get("on", {}).get("error")):
                 ho, hn = r["off"].get("out_hash"), r["on"].get("out_hash")
                 # None when either arm produced no fingerprint, matching the
                 # small-config path. Collapsing it into False here reported a
