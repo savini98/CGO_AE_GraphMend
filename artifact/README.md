@@ -67,9 +67,13 @@ Exit status is 0 only if the row ran and both arms agreed.
 There is one script per claim. Run the direct commands from the repository
 root.
 
-**C1, fixing graph breaks.** Every model runs twice, GraphMend off then on,
-and each row reports breaks found, breaks eliminated, and whether the two arms
-produced the same output. A row whose arms disagree fails the run.
+**C1: GraphMend fixes graph breaks while preserving the outputs of the
+original model.** *Paper §5.1, Table 2.*
+
+Every model runs twice, GraphMend off then on, and each row reports breaks
+found, breaks eliminated, and whether the two arms produced the same output.
+The two halves are one claim, not two: a row whose arms disagree fails the run
+rather than counting as a successful reduction.
 
 ```bash
 docker run --memory=20g graphmend c1
@@ -84,9 +88,13 @@ To see why a particular break survives:
 python -m paper_eval.run_why longformer-base-4096 on
 ```
 
-**C2, full-graph capture.** Checks `torch.compile(fullgraph=True)` on both
-arms. It should fail on the original and succeed on the transformed model.
-Rows that C1 only partially repairs are excluded. No GPU needed.
+**C2: models whose graph breaks GraphMend eliminates completely can be
+captured with `torch.compile(fullgraph=True)`, a prerequisite for serving
+frameworks that rely on full-graph capture.** *Paper §5.6.*
+
+Checks both arms. Capture should fail on the original and succeed on the
+transformed model. Rows that C1 only partially repairs are excluded. No GPU
+needed.
 
 ```bash
 docker run --memory=20g graphmend c2
@@ -100,9 +108,12 @@ docker run --memory=20g graphmend
 bash artifact/run_break_analysis.sh
 ```
 
-**C3, GPU latency.** Compares the original and the fixed model and reports
-cold-start and steady-state latency. Needs an NVIDIA card and downloads
-pretrained weights.
+**C3: fixing graph breaks improves PyTorch 2 execution performance by
+reducing cold-start and steady-state forward-pass latency.** *Paper §5.2-5.4,
+Table 2.*
+
+Compares the original and the fixed model and reports cold-start and
+steady-state latency. Needs an NVIDIA card and downloads pretrained weights.
 
 ```bash
 docker run --gpus all --memory=20g graphmend c3
