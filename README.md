@@ -36,6 +36,14 @@ A successful run exits with status 0.
 > the floor). The image is 7.3 GB, one build leaves about 7 GB of build
 > cache, and the model weights are roughly 15 GB across the three claims.
 
+The Zenodo deposit also carries the built image, so the claims can be run
+without a build:
+
+```bash
+docker load < graphmend-image.tar.gz
+docker run --rm --gpus all --memory=20g graphmend:cgo2027 c1 t5-small
+```
+
 If the repository was cloned without submodules:
 
 ```bash
