@@ -176,6 +176,13 @@ def _bs(default_b, default_s):
             int(os.environ.get("GM_BENCH10_SEQ", default_s)))
 
 
+# The batch is sized against a plain forward pass, but the timed run compiles
+# with mode="reduce-overhead" and captures CUDA graphs, which needs more memory
+# than the probe sees. On the largest model that gap is enough to exhaust the
+# card at the usual target, so it gets a lower one.
+_TARGET = {"Phi-4-mini-instruct": 0.50}
+
+
 def _auto_batch(model, inputs, torch, key, target=0.70):
     """Size the batch to a target fraction of GPU memory.
 
@@ -187,6 +194,7 @@ def _auto_batch(model, inputs, torch, key, target=0.70):
     Returns None when it cannot measure, in which case the caller keeps the
     built-in batch rather than guessing.
     """
+    target = _TARGET.get(key, target)
     import gc
     try:
         total = torch.cuda.get_device_properties(0).total_memory
