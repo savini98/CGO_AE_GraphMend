@@ -56,7 +56,7 @@ skips the submodule fetch because the tree is already present, and detects an
 already-patched tree, so it is safe to re-run.
 
 This copy is self-contained: the typeshed stubs are bundled, so setup.sh needs
-no network. It does need `git`, which is how the patch is applied.
+no network. It does need \`git\`, which is how the patch is applied.
 INFO
 
 echo "==> writing $OUT"
