@@ -131,8 +131,8 @@ def main(keys):
     # time and the consolidated table only prints at the end, so without this a
     # reviewer is reading six unlabelled values for the length of the run.
     print(f"ROW {'model':28} {'breaks':>8} {'after':>8} {'fixed':>7} "
-          f"{'output':>10}", flush=True)
-    print(f"    {'-' * 65}", flush=True)
+          f"{'correctness':>13}", flush=True)
+    print(f"    {'-' * 68}", flush=True)
     # Stable: the heavy rows move to the end, everything else keeps its order.
     keys = sorted(keys, key=lambda k: k in RUN_LAST)
     for key in keys:
@@ -149,7 +149,7 @@ def main(keys):
         err = off["error"] or on["error"]
         if err:
             rows.append((key, "-", "-", "-", "ERR", "-"))
-            print(f"ROW {key:28} {'-':>8} {'-':>8} {'-':>7} {'ERR':>10}",
+            print(f"ROW {key:28} {'-':>8} {'-':>8} {'-':>7} {'ERR':>13}",
                   flush=True)
             print(f"  {key}: {err}", file=sys.stderr)
             continue
@@ -175,7 +175,7 @@ def main(keys):
         # minutes warm and hours cold, and a caller that captures stdout sees
         # nothing at all until the last model finishes -- which makes a working
         # run indistinguishable from a hung one.
-        print(f"ROW {key:28} {b0:>8} {b1:>8} {pct:>7} {correct:>10}",
+        print(f"ROW {key:28} {b0:>8} {b1:>8} {pct:>7} {correct:>13}",
               flush=True)
 
     # Driven by verify_break_elimination.py, which prints one consolidated

@@ -211,17 +211,17 @@ def main():
     got.update(run_reference(ref_keys, jac))
 
     print(f"{'model':32s} {'breaks':>7s} {'fixed':>6s} {'left':>5s} "
-          f"{'rate':>6s} {'output':>10s}")
-    print("-" * 74)
+          f"{'rate':>6s} {'correctness':>13s}")
+    print("-" * 77)
     errors = out_diff = tot_b = tot_a = measured = 0
     for key in sorted(MODELS):
         if key in skip:
             print(f"{key:32s} {'-':>7s} {'-':>6s} {'-':>5s} {'-':>6s} "
-                  f"{'skipped':>10s}")
+                  f"{'skipped':>13s}")
             continue
         if key not in got:
             print(f"{key:32s} {'ERR':>7s} {'-':>6s} {'-':>5s} {'-':>6s} "
-                  f"{'-':>10s}")
+                  f"{'-':>13s}")
             errors += 1
             continue
         b, a, okout = got[key]
@@ -233,9 +233,9 @@ def main():
         if okout is False:
             out_diff += 1
         oc = "identical" if okout else ("CHANGED" if okout is False else "n/a")
-        print(f"{key:32s} {b:7d} {fixed:6d} {a:5d} {rate:5d}% {oc:>10s}")
+        print(f"{key:32s} {b:7d} {fixed:6d} {a:5d} {rate:5d}% {oc:>13s}")
 
-    print("-" * 74)
+    print("-" * 77)
     tot_fixed = tot_b - tot_a
     tot_rate = round(100 * tot_fixed / tot_b) if tot_b else 0
     print(f"{'TOTAL':32s} {tot_b:7d} {tot_fixed:6d} {tot_a:5d} {tot_rate:5d}%")
