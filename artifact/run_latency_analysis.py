@@ -118,6 +118,7 @@ PAPER_SEQ = {
     "blenderbot-400M-distill": 5, "tiny-random-PegasusForCausalLM": 5,
     "longformer-scico": 5, "Qwen-Audio-Chat": 5, "Phi-4-mini-instruct": 5,
     "chronos-bolt-small": 128,
+    "MoLFormer-XL-both10pct": 37,
 }
 
 PAPER_BATCH = {
@@ -302,7 +303,8 @@ def build_fixed_tree(fixed_models, rows, workdir, python):
     return dest_root, applied, defer_only, mod_copy
 
 
-def run_arm(bench, python, key, on, trace_dir, extra_path, runs, hf_modules=None):
+def run_arm(bench, python, key, on, trace_dir, extra_path, runs, hf_modules=None,
+            batch=None):
     """One arm, in-process in bench.py, with no compiler in the loop."""
     env = dict(os.environ)
     env["GM_BENCH10_ARM"] = "1"
@@ -317,40 +319,21 @@ def run_arm(bench, python, key, on, trace_dir, extra_path, runs, hf_modules=None
     if hf_modules:
         env["HF_MODULES_CACHE"] = hf_modules
     env["GM_MODEL"] = key
-    # Same batch for BOTH arms. The reference
-    # auto-detects it from free GPU memory, and the fixed model needs less, so
-    # five rows there were measured with the arms on different batches; a ratio
-    # across unequal batches compares unequal work.
-    # GM_PAPER_BATCH=1 pins the paper's per-model batch (from its own run log)
-    # for BOTH arms. Off by default: bench.py's small defaults are what a
-    # reviewer gets without the paper's internal log, they run on any card, and
-    # the paper's sizes (t5-small 1345) do not fit a 24 GB 3090 with anything
-    # else resident. The trade-off is direction, not validity: a small batch
-    # leaves the fixed compile cost unamortised, so cold start reads HIGH, while
-    # the paper's larger batches read lower. Table 2 sits between the two.
-    # The sequence is fixed by the reference scripts (seq_len=5 for the text
-    # rows) and only the BATCH is auto-sized. Applying it in both modes is what
-    # makes auto-sizing follow the paper's protocol rather than half of it:
-    # auto-batch at our seq 128 agrees with the default,
-    # while the paper's 1345x5 gives 10.32x.
+    # Both arms must run the same batch, or the ratio compares unequal work.
     if key in PAPER_SEQ and not os.environ.get("GM_BENCH10_SEQ"):
         env["GM_BENCH10_SEQ"] = str(PAPER_SEQ[key])
-    if not os.environ.get("GM_PAPER_BATCH") and not os.environ.get(
-            "GM_BENCH10_BATCH"):
-        # Fill ~70% of VRAM, the paper's rule, which transfers across GPUs where
-        # its recorded numbers do not.
-        env["GM_BENCH10_AUTO_BATCH"] = "1"
-    if os.environ.get("GM_PAPER_BATCH") and key in PAPER_BATCH:
-        env["GM_BENCH10_BATCH"] = str(PAPER_BATCH[key])
-        # The sequence has to move with the batch, or the row runs a workload
-        # the paper never measured.
-        if key in PAPER_SEQ:
-            env["GM_BENCH10_SEQ"] = str(PAPER_SEQ[key])
-    # A PRIVATE Inductor cache per arm. Sharing one lets the second arm reuse
-    # kernels the first compiled and inflates the cold ratio several-fold.
-    icache = os.path.join(trace_dir, "inductor_" + ("on" if on else "off"))
-    os.makedirs(icache, exist_ok=True)
+    if not os.environ.get("GM_BENCH10_BATCH"):
+        if batch:
+            env["GM_BENCH10_BATCH"] = str(batch)
+        elif key in PAPER_BATCH and os.environ.get("GM_PAPER_BATCH"):
+            env["GM_BENCH10_BATCH"] = str(PAPER_BATCH[key])
+        else:
+            env["GM_BENCH10_AUTO_BATCH"] = "1"
+    # A fresh cache for every arm of every repeat, so each cold start is cold.
+    icache = tempfile.mkdtemp(prefix="inductor_" + ("on_" if on else "off_"),
+                              dir=trace_dir)
     env["TORCHINDUCTOR_CACHE_DIR"] = icache
+    env["TRITON_CACHE_DIR"] = os.path.join(icache, "triton")
     # Run from a directory whose jac.toml turns claiming OFF. jac resolves
     # configuration to the nearest ancestor and does not merge, so an arm left
     # in the repository root picks up its `graphmend_claim_imports = true`: the
@@ -364,6 +347,7 @@ def run_arm(bench, python, key, on, trace_dir, extra_path, runs, hf_modules=None
         fh.write("[run]\ngraphmend = false\ngraphmend_claim_imports = false\n")
     p = subprocess.run([python, bench], capture_output=True, text=True,
                        env=env, check=False, cwd=armdir)
+    shutil.rmtree(icache, ignore_errors=True)
     for line in p.stdout.splitlines():
         if line.startswith("GMBENCH10 "):
             return json.loads(line[len("GMBENCH10 "):])
@@ -377,8 +361,10 @@ def main():
     ap.add_argument("--fixed-models", default=os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "fixed_models"))
     ap.add_argument("--runs", default="10",
-                    help="forward passes per arm (default 10): the first is cold, "
-                         "the rest are medianed for steady state")
+                    help="forward passes timed per arm (default 10): the first "
+                         "is cold start, the mean of the rest is steady state. "
+                         "bench.py runs one more, untimed, to close the last "
+                         "timed one")
     ap.add_argument("--repeat", type=int, default=5,
                     help="independent measurements per row (default 5); cold "
                          "start is one sample per measurement, so repeats are "
@@ -429,30 +415,20 @@ def main():
         tdir = os.path.join(work, key)
         os.makedirs(tdir, exist_ok=True)
         reps, failed = [], None
+        # This row's batch, set by its first original arm.
+        pinned = None
         for _rep in range(max(1, o.repeat)):
             try:
                 off = run_arm(bench, sys.executable, key, False, tdir, None,
-                              o.runs)
-                # Pin the fixed arm to whatever the original arm sized to. The
-                # fixed model uses less memory, so left to itself it would pick
-                # a LARGER batch and the ratio would span unequal work. The
-                # reference runs have exactly that flaw on two rows.
-                if off.get("auto_batch"):
-                    os.environ["GM_BENCH10_BATCH"] = str(off["auto_batch"])
-                # The shared tree may hold another row's copy of a same-named
-                # module by now, so re-assert this row's own sources first.
+                              o.runs, batch=pinned)
+                # The fixed arm and later repeats reuse this batch; sized
+                # alone, the fixed model would pick a larger one.
+                if pinned is None:
+                    pinned = (off.get("in_shape") or [None])[0]
+                # Another row may have overwritten a same-named module.
                 apply_row_sources(fixed_path, o.fixed_models, key)
-                # Hub rows keep their model code in the modules cache, which
-                # does not exist until something downloads it. On a machine
-                # that has never run these models it was absent when the fixed
-                # tree was built, so the copy found nothing and the fixed arm
-                # ran the stock code in both arms. The original arm above has
-                # populated it by now, so build it here instead.
-                # Re-copy every time rather than only when the cache was
-                # missing: the modules cache is created by the first download,
-                # so on a machine that has never run these models it is absent
-                # when the fixed tree is built and appears only once the
-                # original arm above has run.
+                # Hub models' code exists only after the original arm's first
+                # download, so patch it here, every time.
                 _hfmod, _hub = hub_copy(o.fixed_models, [key], work)
                 if _hfmod:
                     hfmod = _hfmod
@@ -460,7 +436,7 @@ def main():
                         for _srcdir, _base in _hub:
                             print(f"    {_srcdir}/{_base}", flush=True)
                 on = run_arm(bench, sys.executable, key, True, tdir, fixed_path,
-                             o.runs, hfmod)
+                             o.runs, hfmod, batch=pinned)
             except RuntimeError as exc:
                 failed = str(exc)
                 break
@@ -517,6 +493,11 @@ def main():
             print(f"{'-' * 66}", flush=True)
         print(f"{key:32s} {cold:7.2f}x {warm:8.3f}x "
               f"{str(lo) + ' -> ' + str(ln):>14s}", flush=True)
+        sz = reps[0][0].get("batch_sizing")
+        if sz:
+            print(f"    batch {pinned}: {sz['workload']} peaks at "
+                  f"{sz['peak_gb']:.1f} GB, {sz['fill']:.0%} of "
+                  f"{sz['total_gb']:.0f} GB", flush=True)
 
     print()
     print(f"{'model':32s} {'cold':>10s} {'steady state':>14s} "
@@ -531,8 +512,9 @@ def main():
         print(f"each value is the mean of {results[0][6]} measurements; "
               f"widest cold spread {worst[5]:.0f}% on {worst[0]}")
     print(f"{len(results)} row(s) measured on this GPU, from traces this run")
-    print("produced. Expect cold start in the single to low double digits")
-    print("(inversely related to batch) and steady state near 1.0x.")
+    print(f"produced. Steady state is the mean of iterations 2-{o.runs}, as in")
+    print("the paper. Expect cold start in the single to low double digits")
+    print("(inversely related to batch).")
     if bad:
         print(f"\n{bad} row(s) failed.")
     return 1 if bad else 0

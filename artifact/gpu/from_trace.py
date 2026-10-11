@@ -7,7 +7,7 @@
 
 A compiled region emits a `Torch-Compiled Region: N/M` marker each time it
 executes, so the interval between consecutive markers for the first region is
-one iteration: cold is the first interval, warm the median of the rest.
+one iteration: cold is the first interval, warm the mean of the rest.
 
 Magnitudes depend on the card, the driver and the batch size. What does not is
 the mechanism, which is what the C3 script gates on: breaks reaching zero
@@ -85,27 +85,15 @@ def summarize(path, label):
         return None
     cold = ws[0]
     # The paper's definition: "the mean across the nine subsequent iterations
-    # as the steady-state latency" (Sec. 5, Profiling Methodology). Note that
-    # profiling_utils.py uses the MEDIAN instead, so the two disagree slightly;
-    # both are printed here.
+    # as the steady-state latency" (Sec. 5, Profiling Methodology).
     warm = statistics.mean(ws[1:])
-    warm_med = statistics.median(ws[1:])
     launches, kernels = counts(path)
     print(f"  {label:9s} {os.path.basename(path)}")
     print(f"     region {region}, {len(ws)} windows")
     print("     windows ms: " + " ".join(f"{w:.1f}" for w in ws[:8]))
     print(f"     cold {cold:9.1f} ms   warm(mean) {warm:8.3f} ms   "
-          f"warm(median) {warm_med:8.3f} ms   launches {launches}")
-    # Iteration 2 is frequently still warming up (CUDA-graph capture), and a
-    # MEAN over few warm iterations is not robust to it. Where the gap is
-    # large the two statistics disagree enough to change the sign of the
-    # result, so say so rather than letting the reader pick one blind.
-    if len(ws) > 2 and ws[1] > 1.5 * statistics.median(ws[2:]):
-        print(f"     NOTE: window 2 is {ws[1]:.1f} ms against a "
-              f"{statistics.median(ws[2:]):.1f} ms steady state, so it is "
-              f"still warming up.\n"
-              f"           It inflates the mean; the median is unaffected.")
-    return {"cold": cold, "warm": warm, "warm_med": warm_med,
+          f"launches {launches}")
+    return {"cold": cold, "warm": warm,
             "launches": launches, "n_warm": len(ws) - 1}
 
 
@@ -119,7 +107,6 @@ def pair(orig_path, fixed_path):
     print(f"  COLD SPEEDUP   {o['cold'] / f['cold']:.2f}x")
     print(f"  WARM SPEEDUP   {o['warm'] / f['warm']:.3f}x (mean, the paper's "
           f"definition; {o['n_warm']} warm iterations in this trace)")
-    print(f"  WARM (median)  {o['warm_med'] / f['warm_med']:.3f}x")
     if o["launches"] and f["launches"]:
         print(f"  LAUNCHES       {o['launches']} -> {f['launches']}")
     return 0
