@@ -300,7 +300,8 @@ def _moe_minicpm():
     """moe-minicpm-x4-base (DS 15, 0% in Table 2). Hub remote code."""
     from transformers import AutoConfig, AutoModelForCausalLM
     repo = "babybirdprd/moe-minicpm-x4-base"
-    cfg = AutoConfig.from_pretrained(repo, trust_remote_code=True)
+    rev = "6316cb17cde83b8491841e97adec9ba24f7528c0"
+    cfg = AutoConfig.from_pretrained(repo, trust_remote_code=True, revision=rev)
     for k, v in [("num_hidden_layers", 2), ("hidden_size", 64),
                  ("num_attention_heads", 2), ("intermediate_size", 128),
                  ("vocab_size", 512)]:

@@ -178,7 +178,8 @@ def main(keys):
         # minutes warm and hours cold, and a caller that captures stdout sees
         # nothing at all until the last model finishes -- which makes a working
         # run indistinguishable from a hung one.
-        print(f"ROW {key:28} {b0:>8} {b1:>8} {pct:>7} {correct:>13}",
+        print(f"ROW {key:28} {b0:>8} {b1:>8} {pct:>7} {correct:>13} "
+              f"{off.get('dtype') or '-':>9} {off.get('device') or '-':>6}",
               flush=True)
 
     # Driven by verify_break_elimination.py, which prints one consolidated

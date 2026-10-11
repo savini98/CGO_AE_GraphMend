@@ -121,10 +121,15 @@ for v in inputs.values():
 # the returned tensor IS the token ids, so the hash is over the sequence.
 compared = "tokens" if spec.get("call") == "generate" else "logits"
 
+# Reported per row: some break counts depend on the dtype the model ran in.
+_p = next(model.parameters(), None)
+dtype = str(_p.dtype).replace("torch.", "") if _p is not None else None
+device = _p.device.type if _p is not None else None
+
 print("GMRESULT " + json.dumps({
     "key": key, "graphs": len(graphs), "breaks": max(0, len(graphs) - 1),
     "out_hash": out_hash, "in_shape": in_shape, "compared": compared,
-    "error": None,
+    "dtype": dtype, "device": device, "error": None,
 }))
 
 # ---------------------------------------------------------------------------
