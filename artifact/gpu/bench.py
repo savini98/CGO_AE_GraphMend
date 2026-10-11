@@ -20,8 +20,11 @@ Compilation is therefore excluded from BOTH arms.
 Measuring total first-call wall clock instead gives roughly 1x on every model,
 which is a correct measurement of the wrong thing.
 
-STEADY STATE. The median of the remaining region-0/0 intervals, which are
-replays.
+STEADY STATE. The mean of the remaining region intervals, iterations 2 through
+N: the paper's "mean across the nine subsequent iterations" when N is 10. An
+interval runs from one iteration's first marker to the next iteration's, so one
+extra, untimed forward pass follows the N timed ones to close iteration N's
+interval.
 
 CONFIGURATION MATTERS MORE THAN THE METRIC. Three settings in the paper's model
 scripts each drag every ratio toward 1.0 when missed: the batch size (about 70%
@@ -32,10 +35,8 @@ benchmark reproduces the authors' own MoLFormer warm timings to within about 1%:
 119.3 ms against their 117.8 ms original, 115.5 ms against their 116.2 ms fixed,
 at 1.0 GB against their 0.97 GB peak.
 
-On that matched configuration steady state comes out at 1.033x, and the authors'
-own traces give 1.014x, against Table 2's 1.13x. That disagreement is the real
-open item, and it is not a mis-configuration artifact: the configuration
-reproduces their per-iteration times to 1%.
+On that matched configuration steady state comes out at 1.16x on an RTX 3090,
+against Table 2's 1.13x.
 
 Both arms load FULL PRETRAINED checkpoints, because latency depends on real
 layer counts and widths, and both run under `jac run` with their own jac.toml:
@@ -176,99 +177,116 @@ def _bs(default_b, default_s):
             int(os.environ.get("GM_BENCH10_SEQ", default_s)))
 
 
-# The batch is sized against a plain forward pass, but the timed run compiles
-# with mode="reduce-overhead" and captures CUDA graphs, which needs more memory
-# than the probe sees. On the largest model that gap is enough to exhaust the
-# card at the usual target, so it gets a lower one.
-_TARGET = {"Phi-4-mini-instruct": 0.50}
+# What the sizer measured, reported beside the arm's timings so a run shows the
+# fill it reached rather than asserting it.
+_SIZING = {}
+
+
+def _resize(inputs, b, torch):
+    """`inputs` at batch `b`, each batch-first tensor repeated along dim 0."""
+    probe_b = int(next(iter(inputs.values())).shape[0])
+    out = {}
+    for k, v in inputs.items():
+        if isinstance(v, torch.Tensor) and v.dim() > 0 and v.shape[0] == probe_b:
+            reps = -(-b // probe_b)
+            v = v.repeat(reps, *([1] * (v.dim() - 1)))[:b].contiguous()
+        out[k] = v
+    return out
 
 
 def _auto_batch(model, inputs, torch, key, target=0.70):
-    """Size the batch to a target fraction of GPU memory.
-
-    Probes one forward pass at the built-in batch, converts that into a
-    per-sample memory cost, inflates it by the same size-tiered generation
-    multiplier the reference uses (a single forward with one decoder token
-    badly underestimates KV-cache growth), and fills `target` of VRAM.
-
-    Returns None when it cannot measure, in which case the caller keeps the
-    built-in batch rather than guessing.
-    """
-    target = _TARGET.get(key, target)
+    """Batch at which the whole run (100 generated tokens, or one forward
+    pass) peaks at `target` of GPU memory, found by measuring rather than
+    extrapolating from one small probe."""
     import gc
     try:
         total = torch.cuda.get_device_properties(0).total_memory
+        gc.collect()
         torch.cuda.empty_cache()
-        # Free memory, not just total. Sizing against the card's capacity
-        # assumes this process owns it, and on a GPU with anything else
-        # resident -- another job, a notebook, a display server -- the estimate
-        # exceeds what can be allocated. The verify loop below then halves its
-        # way down, rebuilding the model on every failed attempt, which turns a
-        # seconds-long probe into minutes and lands on a batch the run never
-        # meant to measure.
         free_mem = torch.cuda.mem_get_info()[0]
-        gc.collect()
-        torch.cuda.reset_peak_memory_stats()
         baseline = torch.cuda.memory_allocated(0)
+        # 70% of the card. If something else holds part of it, 70% of what this
+        # process can have, so the batch never exceeds what can be allocated.
+        goal = min(total * target, baseline + free_mem * target)
         probe_b = int(next(iter(inputs.values())).shape[0])
-        with torch.inference_mode():
-            model(**inputs)
-            torch.cuda.synchronize()
-        peak = torch.cuda.max_memory_allocated(0)
-        torch.cuda.empty_cache()
-        gc.collect()
+        cap = int(os.environ.get("GM_BENCH10_BATCH_CAP", "65536"))
+        gen = hasattr(model, "generate") and key != "MoLFormer-XL-both10pct"
 
-        per_sample = max((peak - baseline) / max(probe_b, 1), 1024)
-        model_gb = baseline / (1024 ** 3)
-        # The inflation exists for generation, where a KV cache grows over the
-        # decode steps and a single-token probe cannot see it. The latency path
-        # runs one forward pass and grows nothing, so applying it there divides
-        # the budget by up to eighty and fills a few percent of the card
-        # instead of the 70% the paper sizes to. The verify loop below halves
-        # on a real allocation, so an estimate that is too large is caught.
-        if os.environ.get("GM_BENCH10_THROUGHPUT"):
-            mult = (80.0 if model_gb > 3.0 else
-                    40.0 if model_gb > 1.0 else
-                    30.0 if model_gb > 0.3 else 10.0)
-        else:
-            mult = 1.0
-        available = min((total * target) - baseline, free_mem * target)
-        if available <= 0:
-            return None
-        bs = int(available / (per_sample * mult))
-        # The cap is a guard against a runaway estimate, not a sizing rule:
-        # at 2048 it binds well before 70% on a large card and silently caps
-        # the fill. The verify loop below halves on a real allocation, so the
-        # ceiling only has to stop something absurd.
-        bs = max(1, min(bs, int(os.environ.get("GM_BENCH10_BATCH_CAP", "65536"))))
-        print(f"# auto-batch: model {model_gb:.2f} GB, per-sample "
-              f"{per_sample / 1024:.1f} KB, multiplier {mult:.0f}x, "
-              f"target {target:.0%} of {total / 1024 ** 3:.1f} GB total / "
-              f"{free_mem / 1024 ** 3:.1f} GB free -> batch {bs}")
-        # Verify rather than trust. The estimate comes from a probe at a small
-        # batch, and activation growth is not linear in it, so the number can be
-        # too large and the run then dies at allocation time. Halve until a real
-        # forward at that batch survives, which is what the reference does
-        # before it reports "Verified: batch_size=N fits".
-        while bs > 1:
+        def peak(b):
+            """Peak allocated bytes of the whole run at batch b; None if OOM."""
+            nonlocal gen
+            x = _resize(inputs, b, torch)
+            gc.collect()
+            torch.cuda.empty_cache()
+            torch.cuda.reset_peak_memory_stats()
             try:
-                os.environ["GM_BENCH10_BATCH"] = str(bs)
-                probe_model, probe_inputs = build(key, "cuda")
                 with torch.inference_mode():
-                    probe_model(**probe_inputs)
-                    torch.cuda.synchronize()
-                peak = torch.cuda.max_memory_allocated(0) / (1024 ** 3)
-                del probe_model, probe_inputs
-                torch.cuda.empty_cache()
-                gc.collect()
-                print(f"# auto-batch: verified {bs} fits (peak {peak:.2f} GB)")
-                break
+                    if gen:
+                        try:
+                            model.generate(**x, max_new_tokens=100,
+                                           min_new_tokens=100, do_sample=False,
+                                           num_beams=1)
+                        except torch.cuda.OutOfMemoryError:
+                            raise
+                        except Exception as exc:          # noqa: BLE001
+                            # No usable generate(): the whole run is a forward.
+                            print(f"# auto-batch: generate() unavailable "
+                                  f"({type(exc).__name__}), sizing a forward pass")
+                            gen = False
+                            torch.cuda.reset_peak_memory_stats()
+                            model(**x)
+                    else:
+                        model(**x)
+                torch.cuda.synchronize()
+                return torch.cuda.max_memory_allocated(0)
             except torch.cuda.OutOfMemoryError:
-                torch.cuda.empty_cache()
+                return None
+            finally:
+                del x
                 gc.collect()
-                bs = max(1, bs // 2)
-                print(f"# auto-batch: did not fit, retrying at {bs}")
-        os.environ.pop("GM_BENCH10_BATCH", None)
+                torch.cuda.empty_cache()
+
+        pts, too_big = [], None       # (batch, peak) that fit; least that did not
+        b = probe_b
+        while b <= cap:
+            p = peak(b)
+            if p is None:
+                too_big = b
+                break
+            pts.append((b, p))
+            if p >= 0.5 * goal:
+                break
+            b *= 4
+        if not pts:
+            return None
+        # Correct along the line through the two largest batches that fit.
+        for _ in range(6):
+            b1, p1 = pts[-2] if len(pts) > 1 else (0, baseline)
+            b2, p2 = pts[-1]
+            slope = max((p2 - p1) / max(b2 - b1, 1), 1.0)
+            b = int(b2 + (goal - p2) / slope)
+            if too_big is not None:
+                b = min(b, too_big - 1)
+            b = max(1, min(b, cap))
+            if any(b == q for q, _ in pts):
+                break
+            p = peak(b)
+            if p is None:
+                too_big = b if too_big is None else min(too_big, b)
+                continue
+            pts = sorted(pts + [(b, p)])
+            if abs(p - goal) <= 0.03 * total:
+                break
+        ok = [t for t in pts if t[1] <= goal + 0.03 * total] or pts[:1]
+        bs, p = min(ok, key=lambda t: abs(t[1] - goal))
+        _SIZING.update({
+            "workload": "100-token generation" if gen else "one forward pass",
+            "fill": p / total, "peak_gb": p / 1024 ** 3,
+            "total_gb": total / 1024 ** 3, "goal_gb": goal / 1024 ** 3,
+            "probes": [[q, round(r / 1024 ** 3, 3)] for q, r in pts]})
+        print(f"# auto-batch: {_SIZING['workload']}, peak {p / 1024 ** 3:.2f} GB "
+              f"= {p / total:.0%} of {total / 1024 ** 3:.1f} GB "
+              f"(target {target:.0%}) -> batch {bs}")
         return bs
     except Exception as exc:                      # noqa: BLE001
         print(f"# auto-batch failed ({type(exc).__name__}), keeping default")
@@ -434,7 +452,11 @@ def _build_extra(key, device, torch):
                  [250, 100, 500, 150], [0, 200, 100, 250]]
         inputs = proc(images=_dummy_image(224, 224), text=words, boxes=boxes,
                       return_tensors="pt", padding=True, truncation=True)
-        return m.to(device).eval(), _to_device(inputs, device, torch)
+        # One example, repeated to the requested batch; without this every
+        # batch setting, the paper's 31 included, ran at batch 1.
+        b, _ = _bs(1, 0)
+        return m.to(device).eval(), _resize(_to_device(inputs, device, torch),
+                                            b, torch)
 
     if key == "chronos-bolt-small":
         import numpy as np
@@ -657,11 +679,10 @@ def arm():
 
     # Paper batch sizing: "Batch sizes target about 70% of GPU memory per
     # model; original and fixed models use identical batch sizes and inputs."
-    # This mirrors the reference batch sizing in
-    # gpu_utils.py, so the batch is chosen by the paper's RULE rather than
-    # copied from the paper's MACHINE. On a 24 GB card that yields a smaller
-    # batch than the 80 GB host the reference traces came from, which is the
-    # point: the rule is what transfers across GPUs, the number is not.
+    # _auto_batch measures the whole run (100 generated tokens, or one forward
+    # pass) to find the batch at that fill, so the batch is chosen by the
+    # paper's RULE rather than copied from the paper's MACHINE: the rule is what
+    # transfers across GPUs, the number is not.
     if (dev == "cuda" and os.environ.get("GM_BENCH10_AUTO_BATCH")
             and not os.environ.get("GM_BENCH10_BATCH")):
         bs = _auto_batch(model, inputs, torch, key)
@@ -693,6 +714,8 @@ def arm():
     res = {"key": key, "device": dev,
            "dtype": str(next(model.parameters()).dtype),
            "in_shape": list(next(iter(inputs.values())).shape)}
+    if _SIZING:
+        res["batch_sizing"] = dict(_SIZING)
 
     if os.environ.get("GM_BENCH10_COUNT"):
         graphs = []
@@ -818,7 +841,7 @@ def arm():
                             with_stack=False)
         with _prof as prof:
             with torch.inference_mode():
-                for _ in range(runs):
+                for _ in range(runs + 1):
                     if cmode != "default":
                         torch.compiler.cudagraph_mark_step_begin()
                     c(**inputs)
@@ -923,7 +946,7 @@ def arm():
             res["cold_window_ms"] = wins[0]
             res["cold_compile_ms"] = comp
             res["cold_ms"] = wins[0] - comp
-            res["warm_ms"] = (statistics.median(wins[1:]) if len(wins) > 1
+            res["warm_ms"] = (statistics.mean(wins[1:runs]) if len(wins) > 1
                               else float("nan"))
             res["all_windows_ms"] = wins
             # Per-forward counts from the LAST region window, which is a replay.
@@ -1031,8 +1054,9 @@ def main():
                          "re-derive cold and steady-state the way the paper "
                          "does, from your own run rather than from ours.")
     ap.add_argument("--runs", type=int, default=None,
-                    help="forward passes to profile (default 8). The paper "
-                         "profiles seven, giving six inter-marker intervals.")
+                    help="forward passes to time (default 8; the C3 script "
+                         "passes 10, the paper's count). One extra, untimed "
+                         "pass follows so the last timed pass is measured.")
     ap.add_argument("--throughput", action="store_true",
                     help="measure C10 end-to-end throughput per arm (paper "
                          "5.4): 100 greedy output tokens for generative "
@@ -1041,9 +1065,10 @@ def main():
                          "whose forward pass is a large share of its inference.")
     ap.add_argument("--auto-batch", action="store_true",
                     help="size the batch by the paper's RULE rather than its "
-                         "numbers: probe one forward, then fill about 70%% of "
-                         "VRAM, as gpu_utils.find_max_batch_size does. Both "
-                         "arms get the same batch. Prefer this over "
+                         "numbers: measure the whole run (100 generated tokens, "
+                         "or one forward pass) and pick the batch at which it "
+                         "peaks at about 70%% of GPU memory. Both arms get "
+                         "the same batch. Prefer this over "
                          "--paper-batch on a GPU that is not a 24 GB 3090.")
     o = ap.parse_args()
     if getattr(o, "paper_batch", False):
@@ -1146,12 +1171,12 @@ def main():
             # 4108 ms in window 1 and a further 5627 ms in window 2 before
             # reaching a 163 ms steady state, so window 1 alone reports 4.68x
             # where the full cold cost is 8.12x. Summing every window above the
-            # steady median is definition-independent and is what a user
+            # steady mean is definition-independent and is what a user
             # actually waits through.
             def _to_steady(ws):
                 if len(ws) < 3:
                     return None
-                steady = statistics.median(ws[2:])
+                steady = statistics.mean(ws[2:])
                 total = 0.0
                 for w in ws:
                     if w <= steady * 1.5:
@@ -1164,7 +1189,7 @@ def main():
                       f"speedup={so/sn:.2f}x   (all pre-steady windows)")
             print(f"    compile inside  off={off['cold_compile_ms']:9.1f}ms "
                   f"on={on['cold_compile_ms']:9.1f}ms")
-            print(f"  warm (median)     off={off['warm_ms']:9.3f}ms "
+            print(f"  warm (mean)       off={off['warm_ms']:9.3f}ms "
                   f"on={on['warm_ms']:9.3f}ms  speedup={off['warm_ms']/on['warm_ms']:.3f}x")
             # If the two arms ran at different batch sizes, the raw warm ratio
             # compares unequal amounts of work and is not a speedup. The
