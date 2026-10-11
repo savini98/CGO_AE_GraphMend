@@ -75,6 +75,10 @@ found, breaks eliminated, and whether the two arms produced the same output.
 The two halves are one claim, not two: a row whose arms disagree fails the run
 rather than counting as a successful reduction.
 
+BART-base, BART-large-CNN, REBEL-large, OPUS-MT and Florence-2 run in fp16, on
+CPU or GPU, with no flag. Their data-dependent breaks are fp16 overflow guards
+(`dtype == torch.float16 and ...`) that do not exist in fp32.
+
 ```bash
 docker run --memory=20g graphmend c1
 bash artifact/run_break_analysis.sh --c1
@@ -183,12 +187,9 @@ python artifact/verify_fixed.py        # check they remove the same breaks
 
 ## Known differences from the paper
 
-The runs print their own counts. Read them against the paper's Table 2. Three
+The runs print their own counts. Read them against the paper's Table 2. Two
 differences are expected, so that a reviewer does not read one as a failure:
 
-- **The CPU sweep runs in fp32**, so some absolute break counts are lower than
-  Table 2's. Guards conditioned on `dtype == torch.float16` are dead code in
-  fp32. On the GPU path in fp16 those rows match.
 - **Four rows do not reach zero**: longformer, clap, moe-minicpm and stella.
   What survives is the paper's declared out-of-scope category. A clean sweep on
   any of them would be the anomaly. `run_why` shows which category a surviving

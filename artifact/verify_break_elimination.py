@@ -128,11 +128,13 @@ def run_small(keys, jac):
         # is measured, and once in the closing table without the prefix. Accept
         # either, so a result is picked up even if the run is cut short before
         # the table is written. Re-reading the same row is idempotent.
-        m = re.match(r"^(?:ROW\s+)?(\S+)\s+(\d+)\s+(\d+)\s+\d+%\s+(\S+)", line)
+        m = re.match(r"^(?:ROW\s+)?(\S+)\s+(\d+)\s+(\d+)\s+\d+%\s+(\S+)"
+                     r"(?:\s+(\S+)\s+(\S+))?", line)
         if m and m.group(1) in MODELS:
             flag = m.group(4)
             ok = True if flag == "yes" else False if flag == "NO" else None
-            out[m.group(1)] = (int(m.group(2)), int(m.group(3)), ok)
+            out[m.group(1)] = (int(m.group(2)), int(m.group(3)), ok,
+                               m.group(5) or "-", m.group(6) or "-")
     # A non-zero exit with no parsed rows means the harness died: an OOM kill
     # at the memory ceiling, a missing model, an import error. run_eval writes
     # that reason to stderr, so surface it instead of leaving bare ERR rows.
@@ -172,7 +174,9 @@ def run_reference(keys, jac):
                 # CHANGED output, and a failed claim, for a row that simply
                 # had nothing to compare.
                 ok = None if (ho is None or hn is None) else (ho == hn)
-                out[inv[bench_key]] = (r["off"]["breaks"], r["on"]["breaks"], ok)
+                dtype = str(r["off"].get("dtype") or "-").replace("torch.", "")
+                out[inv[bench_key]] = (r["off"]["breaks"], r["on"]["breaks"], ok,
+                                       dtype, r["off"].get("device") or "-")
         break
     if rc != 0 and not out:
         _fail("gpu/bench.py --count", rc, lines)
@@ -216,20 +220,20 @@ def main():
     got.update(run_reference(ref_keys, jac))
 
     print(f"{'model':32s} {'breaks':>7s} {'fixed':>6s} {'left':>5s} "
-          f"{'rate':>6s} {'correctness':>13s}")
-    print("-" * 77)
+          f"{'rate':>6s} {'correctness':>13s} {'dtype':>9s} {'device':>6s}")
+    print("-" * 94)
     errors = out_diff = tot_b = tot_a = measured = 0
     for key in sorted(MODELS):
         if key in skip:
             print(f"{key:32s} {'-':>7s} {'-':>6s} {'-':>5s} {'-':>6s} "
-                  f"{'skipped':>13s}")
+                  f"{'skipped':>13s} {'-':>9s} {'-':>6s}")
             continue
         if key not in got:
             print(f"{key:32s} {'ERR':>7s} {'-':>6s} {'-':>5s} {'-':>6s} "
-                  f"{'-':>13s}")
+                  f"{'-':>13s} {'-':>9s} {'-':>6s}")
             errors += 1
             continue
-        b, a, okout = got[key]
+        b, a, okout, dtype, device = got[key]
         fixed = b - a
         rate = round(100 * fixed / b) if b else 0
         tot_b += b
@@ -238,9 +242,10 @@ def main():
         if okout is False:
             out_diff += 1
         oc = "identical" if okout else ("CHANGED" if okout is False else "n/a")
-        print(f"{key:32s} {b:7d} {fixed:6d} {a:5d} {rate:5d}% {oc:>13s}")
+        print(f"{key:32s} {b:7d} {fixed:6d} {a:5d} {rate:5d}% {oc:>13s} "
+              f"{dtype:>9s} {device:>6s}")
 
-    print("-" * 77)
+    print("-" * 94)
     tot_fixed = tot_b - tot_a
     tot_rate = round(100 * tot_fixed / tot_b) if tot_b else 0
     print(f"{'TOTAL':32s} {tot_b:7d} {tot_fixed:6d} {tot_a:5d} {tot_rate:5d}%")
